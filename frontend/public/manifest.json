@@ -1,0 +1,21 @@
+{
+  "short_name": "Royalti HCH",
+  "name": "Celebes Hotel - Royalti Reward HCH",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#E52320",
+  "display": "standalone",
+  "orientation": "portrait"
+}
