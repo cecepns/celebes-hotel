@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
+  Coins,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -66,10 +67,15 @@ export const Register = () => {
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-sm bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200/80 my-6">
-        <div className="text-center mb-6">
+        <div className="text-center mb-5">
           <img src="/logo-hch.jpeg" alt="Royalti Reward HCH" className="h-16 mx-auto object-contain mb-3 rounded-2xl shadow-sm" />
           <h2 className="text-lg font-black text-slate-900 tracking-tight">Daftar Member Baru</h2>
           <p className="text-xs text-slate-500 mt-0.5">Program Royalti Reward HCH</p>
+
+          <div className="mt-3 p-2.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-50 to-amber-500/10 border border-amber-300 text-xs text-amber-950 font-extrabold flex items-center justify-center gap-2 shadow-2xs">
+            <Coins className="w-4 h-4 text-amber-600 animate-bounce" />
+            <span>Bonus Langsung 10 Welcome Points!</span>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">

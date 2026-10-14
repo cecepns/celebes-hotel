@@ -17,15 +17,45 @@ import {
   Tag,
   CreditCard,
   Building,
+  PlusCircle,
+  CalendarDays,
+  Pencil,
+  Trash2,
+  Clock,
+  MessageCircle,
+  LogIn,
 } from 'lucide-react';
 import { Select } from '@/components/common/Select';
 import { Skeleton } from '@/components/common/Skeleton';
+import { Modal } from '@/components/common/Modal';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { EmptyState } from '@/components/common/EmptyState';
 import toast from 'react-hot-toast';
+
+// Helper format DD Mon YYYY (e.g. 31 Des 2026)
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const formatDateID = (dateStr) => {
+  if (!dateStr) return '-';
+  const clean = String(dateStr).split('T')[0];
+  const parts = clean.split('-');
+  if (parts.length === 3) {
+    const day = parts[2];
+    const monthIdx = parseInt(parts[1], 10) - 1;
+    const year = parts[0];
+    const monthName = MONTH_NAMES[monthIdx] || parts[1];
+    return `${day} ${monthName} ${year}`;
+  }
+  return clean;
+};
 
 export const Reservation = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
 
+  // Active Tab: 'new' (Booking Baru) or 'list' (Reservasi Saya)
+  const [activeTab, setActiveTab] = useState('new');
+
+  // New Booking Form State
   const [formData, setFormData] = useState({
     guest_name: user?.name || '',
     guest_phone: user?.phone || '',
@@ -40,8 +70,31 @@ export const Reservation = () => {
   const [rooms, setRooms] = useState([]);
   const [closedDates, setClosedDates] = useState([]);
   const [discountPercent, setDiscountPercent] = useState(10);
+  const [hotelSettings, setHotelSettings] = useState({});
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // My Reservations State
+  const [myReservations, setMyReservations] = useState([]);
+  const [loadingReservations, setLoadingReservations] = useState(false);
+
+  // Edit Modal State
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingReservation, setEditingReservation] = useState(null);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [editForm, setEditForm] = useState({
+    room_type: '',
+    check_in: '',
+    check_out: '',
+    num_rooms: 1,
+    num_guests: 2,
+    notes: '',
+  });
+
+  // Delete Confirm Dialog State
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [reservationToDelete, setReservationToDelete] = useState(null);
+  const [deletingLoading, setDeletingLoading] = useState(false);
 
   // Keep guest_name and guest_phone locked to user profile if authenticated
   useEffect(() => {
@@ -54,11 +107,11 @@ export const Reservation = () => {
     }
   }, [user]);
 
+  // Fetch rooms, settings, closed dates
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoadingRooms(true);
-        // Fetch rooms, settings, and closed dates
         const [roomsRes, settingsRes, closedRes] = await Promise.all([
           request.get(API_ENDPOINTS.ROOMS.PUBLIC),
           request.get(API_ENDPOINTS.SETTINGS.PUBLIC),
@@ -75,8 +128,12 @@ export const Reservation = () => {
           }
         }
 
-        if (settingsRes.success && settingsRes.data?.hch_member_discount_percent) {
-          setDiscountPercent(parseFloat(settingsRes.data.hch_member_discount_percent) || 10);
+        if (settingsRes.success && settingsRes.data) {
+          setHotelSettings(settingsRes.data);
+          if (settingsRes.data.hch_member_discount_percent !== undefined && settingsRes.data.hch_member_discount_percent !== null) {
+            const parsed = parseFloat(settingsRes.data.hch_member_discount_percent);
+            setDiscountPercent(isNaN(parsed) ? 10 : Math.max(0, Math.min(100, parsed)));
+          }
         }
 
         if (closedRes.success && closedRes.data) {
@@ -92,11 +149,38 @@ export const Reservation = () => {
     fetchData();
   }, []);
 
-  // Check if chosen dates hit any closed dates
+  // Fetch Member's Reservations
+  const fetchMyReservations = async () => {
+    if (!isAuthenticated) return;
+    try {
+      setLoadingReservations(true);
+      const res = await request.get(API_ENDPOINTS.MEMBER.RESERVATIONS);
+      if (res.success && res.data) {
+        setMyReservations(res.data);
+      }
+    } catch (err) {
+      console.warn('Failed to load member reservations:', err);
+    } finally {
+      setLoadingReservations(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchMyReservations();
+    }
+  }, [isAuthenticated]);
+
+  // Check if chosen dates hit any closed dates for new booking
   const checkDateConflict = () => {
     if (!formData.check_in || !formData.check_out) return null;
+    const cleanCheckIn = String(formData.check_in).split('T')[0];
+    const cleanCheckOut = String(formData.check_out).split('T')[0];
+
     for (const cd of closedDates) {
-      const isOverlapping = !(formData.check_in >= cd.end_date || formData.check_out <= cd.start_date);
+      const cdStart = String(cd.start_date).split('T')[0];
+      const cdEnd = String(cd.end_date).split('T')[0];
+      const isOverlapping = !(cleanCheckIn >= cdEnd || cleanCheckOut <= cdStart);
       if (isOverlapping) {
         return cd;
       }
@@ -106,7 +190,7 @@ export const Reservation = () => {
 
   const conflictDate = checkDateConflict();
 
-  // Price Calculation
+  // Price Calculation for New Booking
   const selectedRoomObj = rooms.find((r) => r.name === formData.room_type) || rooms[0];
   const roomPrice = selectedRoomObj ? parseFloat(selectedRoomObj.price) : 350000;
   const d1 = new Date(formData.check_in);
@@ -116,6 +200,36 @@ export const Reservation = () => {
   const discountAmount = Math.round(baseSubtotal * (discountPercent / 100));
   const finalTotalPrice = Math.max(0, baseSubtotal - discountAmount);
 
+  // Price Calculation for Edit Modal
+  const editSelectedRoomObj = rooms.find((r) => r.name === editForm.room_type) || rooms[0];
+  const editRoomPrice = editSelectedRoomObj ? parseFloat(editSelectedRoomObj.price) : 350000;
+  const editD1 = new Date(editForm.check_in);
+  const editD2 = new Date(editForm.check_out);
+  const editNights = Math.max(1, Math.round((editD2 - editD1) / (1000 * 60 * 60 * 24)));
+  const editBaseSubtotal = editRoomPrice * editNights * (parseInt(editForm.num_rooms) || 1);
+  const editDiscountAmount = Math.round(editBaseSubtotal * (discountPercent / 100));
+  const editFinalPrice = Math.max(0, editBaseSubtotal - editDiscountAmount);
+
+  // Check if edit dates hit closed dates
+  const checkEditDateConflict = () => {
+    if (!editForm.check_in || !editForm.check_out) return null;
+    const cleanCheckIn = String(editForm.check_in).split('T')[0];
+    const cleanCheckOut = String(editForm.check_out).split('T')[0];
+
+    for (const cd of closedDates) {
+      const cdStart = String(cd.start_date).split('T')[0];
+      const cdEnd = String(cd.end_date).split('T')[0];
+      const isOverlapping = !(cleanCheckIn >= cdEnd || cleanCheckOut <= cdStart);
+      if (isOverlapping) {
+        return cd;
+      }
+    }
+    return null;
+  };
+
+  const editConflictDate = checkEditDateConflict();
+
+  // Submit New Booking
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.guest_name || !formData.guest_phone || !formData.check_in || !formData.check_out || !formData.room_type) {
@@ -131,19 +245,127 @@ export const Reservation = () => {
     try {
       setSubmitting(true);
       const res = await request.post(API_ENDPOINTS.MEMBER.RESERVATIONS, formData);
-      if (res.success && res.data?.whatsapp_url) {
-        toast.success('Reservasi berhasil dicatat! Menghubungkan ke WhatsApp resepsionis...');
-        setTimeout(() => {
-          window.open(res.data.whatsapp_url, '_blank');
-        }, 800);
+      if (res.success) {
+        toast.success('Reservasi berhasil dicatat! Membuka WhatsApp resepsionis...');
+        fetchMyReservations();
+        setActiveTab('list');
+        if (res.data?.whatsapp_url) {
+          setTimeout(() => {
+            window.open(res.data.whatsapp_url, '_blank');
+          }, 800);
+        }
       } else {
         toast.success('Permintaan reservasi berhasil dikirim!');
+        fetchMyReservations();
+        setActiveTab('list');
       }
     } catch (err) {
       toast.error(typeof err === 'string' ? err : 'Gagal mengirim reservasi');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Open Edit Modal
+  const handleOpenEdit = (r) => {
+    setEditingReservation(r);
+    setEditForm({
+      room_type: r.room_type || (rooms[0]?.name || ''),
+      check_in: String(r.check_in).slice(0, 10),
+      check_out: String(r.check_out).slice(0, 10),
+      num_rooms: r.num_rooms || 1,
+      num_guests: r.num_guests || 2,
+      notes: r.notes || '',
+    });
+    setEditModalOpen(true);
+  };
+
+  // Submit Edit Reservation
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editingReservation) return;
+
+    if (editConflictDate) {
+      toast.error(`Tanggal yang dipilih ditutup untuk booking: ${editConflictDate.reason}`);
+      return;
+    }
+
+    try {
+      setSubmittingEdit(true);
+      const res = await request.put(API_ENDPOINTS.MEMBER.RESERVATION_ITEM(editingReservation.id), editForm);
+      if (res.success) {
+        toast.success('Data reservasi berhasil diperbarui!');
+        setEditModalOpen(false);
+        fetchMyReservations();
+        if (res.data?.whatsapp_url) {
+          toast((t) => (
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span>Kirim update ke WhatsApp Resepsionis?</span>
+              <button
+                onClick={() => {
+                  window.open(res.data.whatsapp_url, '_blank');
+                  toast.dismiss(t.id);
+                }}
+                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shrink-0"
+              >
+                Kirim WA
+              </button>
+            </div>
+          ), { duration: 6000 });
+        }
+      } else {
+        toast.error(res.message || 'Gagal mengubah data reservasi');
+      }
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Gagal memperbarui reservasi');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
+  // Open Delete Confirm Dialog
+  const handleOpenDelete = (r) => {
+    setReservationToDelete(r);
+    setDeleteConfirmOpen(true);
+  };
+
+  // Confirm Delete
+  const handleConfirmDelete = async () => {
+    if (!reservationToDelete) return;
+    try {
+      setDeletingLoading(true);
+      const res = await request.delete(API_ENDPOINTS.MEMBER.RESERVATION_ITEM(reservationToDelete.id));
+      if (res.success) {
+        toast.success('Reservasi berhasil dibatalkan / dihapus');
+        setMyReservations((prev) => prev.filter((item) => item.id !== reservationToDelete.id));
+        setDeleteConfirmOpen(false);
+        setReservationToDelete(null);
+      } else {
+        toast.error(res.message || 'Gagal membatalkan reservasi');
+      }
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Gagal menghapus reservasi');
+    } finally {
+      setDeletingLoading(false);
+    }
+  };
+
+  // Open WhatsApp Chat for an Existing Reservation
+  const handleChatReceptionist = (r) => {
+    const waNumber = hotelSettings.whatsapp_number || '6282189001285';
+    const discountText = r.discount_percent > 0 ? ` (Hemat Diskon ${r.discount_percent}%)` : '';
+    const waText = encodeURIComponent(
+      `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin konfirmasi status reservasi kamar saya:\n` +
+      `- ID Booking: #HCH-${r.id}\n` +
+      `- Nama Tamu: ${r.guest_name}\n` +
+      `- Tipe Kamar: ${r.room_type} (${r.num_rooms} Kamar)\n` +
+      `- Check-In: ${formatDateID(r.check_in)}\n` +
+      `- Check-Out: ${formatDateID(r.check_out)}\n` +
+      `- Total Pelunasan: Rp ${Number(r.total_price || 0).toLocaleString('id-ID')}${discountText}\n` +
+      `- Status: ${r.status?.toUpperCase()}\n\n` +
+      `Mohon informasinya mengenai ketersediaan dan nomor rekening/QRIS untuk pelunasan cashless. Terima kasih!`
+    );
+    window.open(`https://wa.me/${waNumber}?text=${waText}`, '_blank');
   };
 
   return (
@@ -164,188 +386,567 @@ export const Reservation = () => {
         </div>
 
         {/* Member Discount Pill */}
-        <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-900 px-2.5 py-1 rounded-full text-[10px] font-extrabold shadow-2xs">
-          <Tag className="w-3.5 h-3.5 text-amber-600" />
-          <span>Diskon {discountPercent}% HCH</span>
-        </div>
+        {discountPercent > 0 ? (
+          <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-900 px-2.5 py-1 rounded-full text-[10px] font-extrabold shadow-2xs">
+            <Tag className="w-3.5 h-3.5 text-amber-600" />
+            <span>Diskon {discountPercent}% HCH</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-700 px-2.5 py-1 rounded-full text-[10px] font-bold">
+            <Building className="w-3.5 h-3.5 text-slate-500" />
+            <span>Tarif Resmi Hotel</span>
+          </div>
+        )}
       </header>
 
       <main className="p-4 space-y-4">
-        {/* HCH Member Discount Promo Banner */}
-        <div className="bg-gradient-to-r from-red-600 to-rose-700 text-white rounded-2xl p-4 shadow-sm relative overflow-hidden">
-          <div className="absolute right-[-10px] top-[-10px] opacity-10">
-            <Building className="w-24 h-24" />
-          </div>
-          <div className="relative z-10 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0">
-              <Sparkles className="w-5 h-5 text-amber-300" />
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-wider text-amber-200">
-                Keuntungan Eksklusif Member HCH
-              </p>
-              <h2 className="text-sm font-black mt-0.5">
-                Hemat {discountPercent}% Khusus Reservasi Aplikasi
-              </h2>
-              <p className="text-[11px] text-white/90 mt-1 leading-snug">
-                Pemesanan kamar lewat website/aplikasi HCH otomatis mendapatkan potongan diskon {discountPercent}% sebelum pelunasan cashless.
-              </p>
-            </div>
-          </div>
+        {/* Navigation Tabs: Booking Baru vs Reservasi Saya */}
+        <div className="flex bg-slate-200/80 p-1 rounded-xl">
+          <button
+            type="button"
+            onClick={() => setActiveTab('new')}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              activeTab === 'new'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Bed className="w-3.5 h-3.5 text-red-600" />
+            <span>Booking Baru</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('list')}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              activeTab === 'list'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <CalendarDays className="w-3.5 h-3.5 text-red-600" />
+            <span>Reservasi Saya</span>
+            {myReservations.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-red-100 text-red-700 text-[10px] font-extrabold">
+                {myReservations.length}
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* Closed Dates Warning Banner if any active */}
-        {closedDates.length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
-            <div className="flex items-center gap-1.5 font-bold text-amber-800">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Pemberitahuan Tanggal Reservasi Hotel:</span>
+        {/* TAB 1: BOOKING BARU */}
+        {activeTab === 'new' && (
+          <>
+            {/* Promo Banner */}
+            {discountPercent > 0 ? (
+              <div className="bg-gradient-to-r from-red-600 to-rose-700 text-white rounded-2xl p-4 shadow-sm relative overflow-hidden">
+                <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                  <Building className="w-24 h-24" />
+                </div>
+                <div className="relative z-10 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0">
+                    <Sparkles className="w-5 h-5 text-amber-300" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-wider text-amber-200">
+                      Keuntungan Eksklusif Member HCH
+                    </p>
+                    <h2 className="text-sm font-black mt-0.5">
+                      Hemat {discountPercent}% Khusus Reservasi Aplikasi
+                    </h2>
+                    <p className="text-[11px] text-white/90 mt-1 leading-snug">
+                      Pemesanan kamar lewat website/aplikasi HCH otomatis mendapatkan potongan diskon {discountPercent}% sebelum pelunasan cashless.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gradient-to-r from-slate-900 to-blue-950 text-white rounded-2xl p-4 shadow-sm relative overflow-hidden">
+                <div className="absolute right-[-10px] top-[-10px] opacity-10">
+                  <Building className="w-24 h-24" />
+                </div>
+                <div className="relative z-10 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-xs flex items-center justify-center shrink-0">
+                    <Building className="w-5 h-5 text-amber-300" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-wider text-amber-300">
+                      Reservasi Resmi Hotel Celebes Hasanuddin
+                    </p>
+                    <h2 className="text-sm font-black mt-0.5">
+                      Jaminan Harga Resmi & Konfirmasi Cepat
+                    </h2>
+                    <p className="text-[11px] text-white/80 mt-1 leading-snug">
+                      Pemesanan langsung terhubung ke resepsionis dengan pelunasan mudah via transfer bank/QRIS cashless sebelum check-in.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Closed Dates Warning Banner if any active */}
+            {closedDates.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Pemberitahuan Tanggal Reservasi Hotel:</span>
+                </div>
+                {closedDates.map((cd) => (
+                  <p key={cd.id} className="text-[11px] text-amber-800/90 pl-5">
+                    • {formatDateID(cd.start_date)} s/d {formatDateID(cd.end_date)}: <strong>{cd.reason}</strong> (Belum dibuka)
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Room Types Showcase Cards */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider px-1">
+                Pilih Tipe Kamar
+              </h3>
+
+              {loadingRooms ? (
+                <div className="space-y-2.5">
+                  <Skeleton className="h-20 w-full" count={3} />
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {rooms.map((room) => {
+                    const isSelected = formData.room_type === room.name;
+                    const originalP = parseFloat(room.price);
+                    const discountedP = originalP - Math.round(originalP * (discountPercent / 100));
+
+                    return (
+                      <div
+                        key={room.id}
+                        onClick={() => setFormData({ ...formData, room_type: room.name })}
+                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-red-50/60 border-red-500 ring-2 ring-red-500/20 shadow-xs'
+                            : 'bg-white border-slate-200/80 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Bed className={`w-4 h-4 ${isSelected ? 'text-red-600' : 'text-slate-400'}`} />
+                            <span className="text-xs font-bold text-slate-900">{room.name}</span>
+                          </div>
+                          {discountPercent > 0 ? (
+                            <div className="text-right">
+                              <div className="flex items-center gap-1.5 justify-end">
+                                <span className="text-[10px] text-slate-400 line-through">
+                                  Rp {Number(originalP).toLocaleString('id-ID')}
+                                </span>
+                                <span className="text-xs font-extrabold text-red-600">
+                                  Rp {Number(discountedP).toLocaleString('id-ID')}
+                                </span>
+                              </div>
+                              <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
+                                Diskon Member {discountPercent}%
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="text-right">
+                              <span className="text-xs font-extrabold text-slate-900">
+                                Rp {Number(originalP).toLocaleString('id-ID')}
+                              </span>
+                              <p className="text-[9px] text-slate-400 font-medium">/ malam</p>
+                            </div>
+                          )}
+                        </div>
+                        {room.description && (
+                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                            {room.description}
+                          </p>
+                        )}
+                        {room.facilities && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {room.facilities.split(',').map((f, i) => (
+                              <span
+                                key={i}
+                                className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium"
+                              >
+                                {f.trim()}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            {closedDates.map((cd) => (
-              <p key={cd.id} className="text-[11px] text-amber-800/90 pl-5">
-                • {cd.start_date} s/d {cd.end_date}: <strong>{cd.reason}</strong> (Belum dibuka)
-              </p>
-            ))}
-          </div>
+
+            {/* Reservation Form */}
+            <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs space-y-3.5">
+              <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                Detail Pemesanan
+              </h3>
+
+              {/* Guest Name */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700">Nama Tamu *</label>
+                  {isAuthenticated && (
+                    <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1 border border-amber-200/60">
+                      <Lock className="w-2.5 h-2.5" /> Akun Member
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    readOnly={isAuthenticated}
+                    value={formData.guest_name}
+                    onChange={(e) => setFormData({ ...formData, guest_name: e.target.value })}
+                    placeholder="Masukkan nama lengkap"
+                    className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none transition ${
+                      isAuthenticated
+                        ? 'bg-slate-100 text-slate-700 border-slate-200 cursor-not-allowed font-medium'
+                        : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                    }`}
+                  />
+                  {isAuthenticated && (
+                    <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
+                  )}
+                </div>
+              </div>
+
+              {/* Guest Phone */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700">Nomor WhatsApp / HP *</label>
+                  {isAuthenticated && (
+                    <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1 border border-amber-200/60">
+                      <Lock className="w-2.5 h-2.5" /> Terkunci otomatis
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="tel"
+                    required
+                    readOnly={isAuthenticated}
+                    value={formData.guest_phone}
+                    onChange={(e) => setFormData({ ...formData, guest_phone: e.target.value })}
+                    placeholder="Contoh: 081212127688"
+                    className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none transition ${
+                      isAuthenticated
+                        ? 'bg-slate-100 text-slate-700 border-slate-200 cursor-not-allowed font-medium'
+                        : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                    }`}
+                  />
+                  {isAuthenticated && (
+                    <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
+                  )}
+                </div>
+              </div>
+
+              {/* Dates Picker */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Check-in *</label>
+                  <input
+                    type="date"
+                    required
+                    min={new Date().toISOString().slice(0, 10)}
+                    value={formData.check_in}
+                    onChange={(e) => setFormData({ ...formData, check_in: e.target.value })}
+                    className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none ${
+                      conflictDate ? 'border-red-500 bg-red-50/30' : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Check-out *</label>
+                  <input
+                    type="date"
+                    required
+                    min={formData.check_in || new Date().toISOString().slice(0, 10)}
+                    value={formData.check_out}
+                    onChange={(e) => setFormData({ ...formData, check_out: e.target.value })}
+                    className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none ${
+                      conflictDate ? 'border-red-500 bg-red-50/30' : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Conflict Warning */}
+              {conflictDate && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Tanggal reservasi ini ditutup ({conflictDate.reason})</p>
+                    <p className="text-[11px] mt-0.5">
+                      Periode {formatDateID(conflictDate.start_date)} s/d {formatDateID(conflictDate.end_date)} saat ini belum dibuka untuk pemesanan kamar. Silakan ganti tanggal lain.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Rooms and Guests Count */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Jumlah Kamar</label>
+                  <Select
+                    options={[1, 2, 3, 4, 5].map((n) => ({ value: n, label: `${n} Kamar` }))}
+                    value={formData.num_rooms}
+                    onChange={(opt) => setFormData({ ...formData, num_rooms: Number(opt.value) })}
+                    isSearchable={false}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Jumlah Tamu</label>
+                  <Select
+                    options={[1, 2, 3, 4, 6, 8, 10].map((n) => ({ value: n, label: `${n} Orang` }))}
+                    value={formData.num_guests}
+                    onChange={(opt) => setFormData({ ...formData, num_guests: Number(opt.value) })}
+                    isSearchable={false}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Catatan Tambahan (Opsional)</label>
+                <textarea
+                  rows={2}
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Contoh: Permintaan double bed, early check-in, atau late check-out"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                />
+              </div>
+
+              {/* Realtime Pricing Breakdown Card */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between font-bold text-slate-800 pb-1.5 border-b border-slate-200">
+                  <span>Ringkasan Estimasi Biaya</span>
+                  <span className="text-[10px] text-slate-500 font-normal">{nights} Malam • {formData.num_rooms} Kamar</span>
+                </div>
+
+                <div className="flex items-center justify-between text-slate-600">
+                  <span>{discountPercent > 0 ? 'Harga Normal:' : 'Total Biaya Kamar:'}</span>
+                  <span>Rp {Number(baseSubtotal).toLocaleString('id-ID')}</span>
+                </div>
+
+                {discountPercent > 0 && (
+                  <div className="flex items-center justify-between text-emerald-600 font-semibold">
+                    <span className="flex items-center gap-1">
+                      <Tag className="w-3.5 h-3.5" /> Diskon Aplikasi HCH ({discountPercent}%):
+                    </span>
+                    <span>-Rp {Number(discountAmount).toLocaleString('id-ID')}</span>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-200 flex items-center justify-between font-black text-sm text-slate-900">
+                  <span>Total Pelunasan (Cashless):</span>
+                  <span className="text-red-600">Rp {Number(finalTotalPrice).toLocaleString('id-ID')}</span>
+                </div>
+              </div>
+
+              {/* Cashless Notice */}
+              <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-start gap-2.5 text-[11px] text-emerald-900">
+                <CreditCard className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Ketentuan Pembayaran Cashless:</p>
+                  <p className="text-emerald-800/90 leading-relaxed mt-0.5">
+                    Pemesanan melalui aplikasi HCH mewajibkan pembayaran pelunasan non-tunai (Transfer / QRIS) sebelum check-in. Resepsionis akan memberikan nomor rekening/QRIS resmi.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting || !!conflictDate}
+                className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md shadow-red-200 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send className="w-4 h-4" />
+                {submitting ? 'Memproses Reservasi...' : 'Kirim Booking & Konfirmasi ke WhatsApp'}
+              </button>
+            </form>
+          </>
         )}
 
-        {/* Room Types Showcase Cards */}
-        <div className="space-y-2">
-          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider px-1">
-            Pilih Tipe Kamar
-          </h3>
+        {/* TAB 2: RESERVASI SAYA (LIST, EDIT, DELETE) */}
+        {activeTab === 'list' && (
+          <div className="space-y-3">
+            {!isAuthenticated ? (
+              <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center space-y-3 shadow-xs">
+                <div className="w-12 h-12 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto">
+                  <LogIn className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-black text-slate-800">Masuk untuk Melihat Riwayat Reservasi</h3>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                  Silakan login dengan akun member HCH Anda untuk melihat, mengubah jadwal, atau membatalkan pesanan kamar.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/login')}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
+                >
+                  Login Sekarang
+                </button>
+              </div>
+            ) : loadingReservations ? (
+              <div className="space-y-3">
+                <Skeleton className="h-32 w-full" count={3} />
+              </div>
+            ) : myReservations.length === 0 ? (
+              <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
+                <EmptyState
+                  icon={CalendarDays}
+                  title="Belum Ada Reservasi"
+                  description="Anda belum memiliki riwayat pemesanan kamar aktif. Klik tombol di bawah untuk memesan kamar."
+                  actionLabel="Booking Kamar Sekarang"
+                  onAction={() => setActiveTab('new')}
+                />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myReservations.map((r) => {
+                  const checkIn = new Date(r.check_in);
+                  const checkOut = new Date(r.check_out);
+                  const itemNights = Math.max(1, Math.round((checkOut - checkIn) / (1000 * 60 * 60 * 24)));
 
-          {loadingRooms ? (
-            <div className="space-y-2.5">
-              <Skeleton className="h-20 w-full" count={3} />
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {rooms.map((room) => {
-                const isSelected = formData.room_type === room.name;
-                const originalP = parseFloat(room.price);
-                const discountedP = originalP - Math.round(originalP * (discountPercent / 100));
-
-                return (
-                  <div
-                    key={room.id}
-                    onClick={() => setFormData({ ...formData, room_type: room.name })}
-                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-red-50/60 border-red-500 ring-2 ring-red-500/20 shadow-xs'
-                        : 'bg-white border-slate-200/80 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Bed className={`w-4 h-4 ${isSelected ? 'text-red-600' : 'text-slate-400'}`} />
-                        <span className="text-xs font-bold text-slate-900">{room.name}</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="flex items-center gap-1.5 justify-end">
-                          <span className="text-[10px] text-slate-400 line-through">
-                            Rp {Number(originalP).toLocaleString('id-ID')}
-                          </span>
-                          <span className="text-xs font-extrabold text-red-600">
-                            Rp {Number(discountedP).toLocaleString('id-ID')}
+                  return (
+                    <div
+                      key={r.id}
+                      className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs space-y-3 hover:border-slate-300 transition"
+                    >
+                      {/* Header Card */}
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-black text-slate-900">#HCH-{r.id}</span>
+                          <span className="text-[10px] text-slate-400 font-medium">
+                            • {new Date(r.created_at).toLocaleDateString('id-ID')}
                           </span>
                         </div>
-                        <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
-                          Diskon Member {discountPercent}%
-                        </span>
+
+                        {/* Status Badge */}
+                        {r.status === 'confirmed' ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Dikonfirmasi
+                          </span>
+                        ) : r.status === 'cancelled' ? (
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold">
+                            Dibatalkan
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-amber-600" />
+                            Menunggu Konfirmasi
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Room & Dates Info */}
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                              <Bed className="w-4 h-4 text-red-600 shrink-0" />
+                              <span>{r.room_type}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {r.num_rooms} Kamar • {r.num_guests} Tamu • {itemNights} Malam
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className="text-xs font-black text-red-600">
+                              Rp {Number(r.total_price || 0).toLocaleString('id-ID')}
+                            </div>
+                            {Number(r.discount_percent) > 0 && (
+                              <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                                Diskon {r.discount_percent}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-[11px] space-y-1">
+                          <div className="flex items-center gap-1.5 text-slate-700 font-semibold">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>
+                              {formatDateID(r.check_in)} s/d {formatDateID(r.check_out)}
+                            </span>
+                          </div>
+                          {r.notes && (
+                            <p className="text-[10px] text-slate-500 italic pl-5">
+                              Catatan: "{r.notes}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons: Chat WA, Edit, Delete */}
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => handleChatReceptionist(r)}
+                          className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 border border-emerald-200/70"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Chat WA</span>
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          {/* Tombol Edit */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(r)}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5"
+                          >
+                            <Pencil className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Edit</span>
+                          </button>
+
+                          {/* Tombol Delete / Batalkan */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDelete(r)}
+                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 border border-red-200/70"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                            <span>Batalkan</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    {room.description && (
-                      <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                        {room.description}
-                      </p>
-                    )}
-                    {room.facilities && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {room.facilities.split(',').map((f, i) => (
-                          <span
-                            key={i}
-                            className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium"
-                          >
-                            {f.trim()}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
 
-        {/* Reservation Form */}
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs space-y-3.5">
-          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-            Detail Pemesanan
-          </h3>
-
-          {/* Guest Name (Auto-locked if logged in) */}
+      {/* MODAL EDIT RESERVASI */}
+      <Modal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        title={`Edit Reservasi (#HCH-${editingReservation?.id})`}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleSaveEdit} className="space-y-3.5">
+          {/* Room Type */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-bold text-slate-700">Nama Tamu *</label>
-              {isAuthenticated && (
-                <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1 border border-amber-200/60">
-                  <Lock className="w-2.5 h-2.5" /> Terkunci otomatis sesuai akun member
-                </span>
-              )}
-            </div>
-            <div className="relative">
-              <input
-                type="text"
-                required
-                readOnly={isAuthenticated}
-                value={formData.guest_name}
-                onChange={(e) => setFormData({ ...formData, guest_name: e.target.value })}
-                placeholder="Masukkan nama lengkap"
-                className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none transition ${
-                  isAuthenticated
-                    ? 'bg-slate-100 text-slate-700 border-slate-200 cursor-not-allowed font-medium'
-                    : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
-                }`}
-              />
-              {isAuthenticated && (
-                <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
-              )}
-            </div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Tipe Kamar *</label>
+            <Select
+              options={rooms.map((rm) => ({
+                value: rm.name,
+                label: `${rm.name} - Rp ${Number(rm.price).toLocaleString('id-ID')}/mlm`,
+              }))}
+              value={editForm.room_type}
+              onChange={(opt) => setEditForm({ ...editForm, room_type: opt.value })}
+              isSearchable={false}
+            />
           </div>
 
-          {/* Guest Phone (Auto-locked if logged in) */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-bold text-slate-700">Nomor WhatsApp / HP *</label>
-              {isAuthenticated && (
-                <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1 border border-amber-200/60">
-                  <Lock className="w-2.5 h-2.5" /> Terkunci otomatis sesuai registrasi
-                </span>
-              )}
-            </div>
-            <div className="relative">
-              <input
-                type="tel"
-                required
-                readOnly={isAuthenticated}
-                value={formData.guest_phone}
-                onChange={(e) => setFormData({ ...formData, guest_phone: e.target.value })}
-                placeholder="Contoh: 081212127688"
-                className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none transition ${
-                  isAuthenticated
-                    ? 'bg-slate-100 text-slate-700 border-slate-200 cursor-not-allowed font-medium'
-                    : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
-                }`}
-              />
-              {isAuthenticated && (
-                <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
-              )}
-            </div>
-          </div>
-
-          {/* Dates Picker */}
+          {/* Dates */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Check-in *</label>
@@ -353,10 +954,10 @@ export const Reservation = () => {
                 type="date"
                 required
                 min={new Date().toISOString().slice(0, 10)}
-                value={formData.check_in}
-                onChange={(e) => setFormData({ ...formData, check_in: e.target.value })}
+                value={editForm.check_in}
+                onChange={(e) => setEditForm({ ...editForm, check_in: e.target.value })}
                 className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none ${
-                  conflictDate ? 'border-red-500 bg-red-50/30' : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                  editConflictDate ? 'border-red-500 bg-red-50/30' : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
                 }`}
               />
             </div>
@@ -365,37 +966,37 @@ export const Reservation = () => {
               <input
                 type="date"
                 required
-                min={formData.check_in || new Date().toISOString().slice(0, 10)}
-                value={formData.check_out}
-                onChange={(e) => setFormData({ ...formData, check_out: e.target.value })}
+                min={editForm.check_in || new Date().toISOString().slice(0, 10)}
+                value={editForm.check_out}
+                onChange={(e) => setEditForm({ ...editForm, check_out: e.target.value })}
                 className={`w-full text-xs p-2.5 rounded-xl border focus:outline-none ${
-                  conflictDate ? 'border-red-500 bg-red-50/30' : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                  editConflictDate ? 'border-red-500 bg-red-50/30' : 'border-slate-200 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
                 }`}
               />
             </div>
           </div>
 
           {/* Conflict Warning */}
-          {conflictDate && (
+          {editConflictDate && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <div>
-                <p className="font-bold">Tanggal reservasi ini ditutup ({conflictDate.reason})</p>
+                <p className="font-bold">Tanggal ditutup ({editConflictDate.reason})</p>
                 <p className="text-[11px] mt-0.5">
-                  Periode {conflictDate.start_date} s/d {conflictDate.end_date} saat ini belum dibuka untuk pemesanan kamar. Silakan ganti tanggal lain.
+                  Periode {formatDateID(editConflictDate.start_date)} s/d {formatDateID(editConflictDate.end_date)} belum dibuka. Silakan pilih tanggal lain.
                 </p>
               </div>
             </div>
           )}
 
-          {/* Rooms and Guests Count */}
+          {/* Rooms and Guests */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Jumlah Kamar</label>
               <Select
                 options={[1, 2, 3, 4, 5].map((n) => ({ value: n, label: `${n} Kamar` }))}
-                value={formData.num_rooms}
-                onChange={(opt) => setFormData({ ...formData, num_rooms: Number(opt.value) })}
+                value={editForm.num_rooms}
+                onChange={(opt) => setEditForm({ ...editForm, num_rooms: Number(opt.value) })}
                 isSearchable={false}
               />
             </div>
@@ -403,8 +1004,8 @@ export const Reservation = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Jumlah Tamu</label>
               <Select
                 options={[1, 2, 3, 4, 6, 8, 10].map((n) => ({ value: n, label: `${n} Orang` }))}
-                value={formData.num_guests}
-                onChange={(opt) => setFormData({ ...formData, num_guests: Number(opt.value) })}
+                value={editForm.num_guests}
+                onChange={(opt) => setEditForm({ ...editForm, num_guests: Number(opt.value) })}
                 isSearchable={false}
               />
             </div>
@@ -414,59 +1015,63 @@ export const Reservation = () => {
             <label className="block text-xs font-semibold text-slate-700 mb-1">Catatan Tambahan (Opsional)</label>
             <textarea
               rows={2}
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Contoh: Permintaan double bed, early check-in, atau late check-out"
+              value={editForm.notes}
+              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+              placeholder="Contoh: Permintaan double bed, check-in malam, dll"
               className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
             />
           </div>
 
-          {/* Realtime Pricing Breakdown Card */}
-          <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl space-y-2 text-xs">
-            <div className="flex items-center justify-between font-bold text-slate-800 pb-1.5 border-b border-slate-200">
-              <span>Ringkasan Estimasi Biaya</span>
-              <span className="text-[10px] text-slate-500 font-normal">{nights} Malam • {formData.num_rooms} Kamar</span>
-            </div>
-
+          {/* Realtime Pricing Preview */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs">
             <div className="flex items-center justify-between text-slate-600">
-              <span>Harga Normal:</span>
-              <span>Rp {Number(baseSubtotal).toLocaleString('id-ID')}</span>
+              <span>Estimasi {editNights} Malam • {editForm.num_rooms} Kamar:</span>
+              <span className="font-semibold">Rp {Number(editBaseSubtotal).toLocaleString('id-ID')}</span>
             </div>
-
-            <div className="flex items-center justify-between text-emerald-600 font-semibold">
-              <span className="flex items-center gap-1">
-                <Tag className="w-3.5 h-3.5" /> Diskon Aplikasi HCH ({discountPercent}%):
-              </span>
-              <span>-Rp {Number(discountAmount).toLocaleString('id-ID')}</span>
-            </div>
-
-            <div className="pt-2 border-t border-slate-200 flex items-center justify-between font-black text-sm text-slate-900">
-              <span>Total Pelunasan (Cashless):</span>
-              <span className="text-red-600">Rp {Number(finalTotalPrice).toLocaleString('id-ID')}</span>
+            {discountPercent > 0 && (
+              <div className="flex items-center justify-between text-emerald-600 font-semibold">
+                <span>Diskon Member HCH ({discountPercent}%):</span>
+                <span>-Rp {Number(editDiscountAmount).toLocaleString('id-ID')}</span>
+              </div>
+            )}
+            <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between font-black text-sm text-slate-900">
+              <span>Total Pelunasan Baru:</span>
+              <span className="text-red-600">Rp {Number(editFinalPrice).toLocaleString('id-ID')}</span>
             </div>
           </div>
 
-          {/* Cashless Notice */}
-          <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-start gap-2.5 text-[11px] text-emerald-900">
-            <CreditCard className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Ketentuan Pembayaran Cashless:</p>
-              <p className="text-emerald-800/90 leading-relaxed mt-0.5">
-                Pemesanan melalui aplikasi HCH mewajibkan pembayaran pelunasan non-tunai (Transfer / QRIS) sebelum check-in. Resepsionis akan memberikan nomor rekening/QRIS resmi.
-              </p>
-            </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setEditModalOpen(false)}
+              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-600 transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={submittingEdit || !!editConflictDate}
+              className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>{submittingEdit ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
+            </button>
           </div>
-
-          <button
-            type="submit"
-            disabled={submitting || !!conflictDate}
-            className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md shadow-red-200 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send className="w-4 h-4" />
-            {submitting ? 'Memproses Reservasi...' : 'Kirim Booking & Konfirmasi ke WhatsApp'}
-          </button>
         </form>
-      </main>
+      </Modal>
+
+      {/* CONFIRM DIALOG BATAL / HAPUS RESERVASI */}
+      <ConfirmDialog
+        isOpen={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={handleConfirmDelete}
+        isLoading={deletingLoading}
+        title="Batalkan Reservasi Kamar"
+        message={`Apakah Anda yakin ingin membatalkan atau menghapus reservasi #${reservationToDelete?.id} (${reservationToDelete?.room_type}) untuk periode ${formatDateID(reservationToDelete?.check_in)} s/d ${formatDateID(reservationToDelete?.check_out)}?`}
+        confirmText="Ya, Batalkan Reservasi"
+        cancelText="Kembali"
+        isDanger={true}
+      />
     </div>
   );
 };

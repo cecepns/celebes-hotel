@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS closed_dates (
 INSERT INTO settings (setting_key, setting_value, description)
 VALUES 
   ('hch_member_discount_percent', '10', 'Persentase diskon reservasi kamar via aplikasi HCH (%)'),
+  ('welcome_points', '10', 'Bonus poin selamat datang otomatis untuk member baru'),
   ('payment_bank_name', 'Bank BCA', 'Nama Bank Rekening Resmi Pembayaran Cashless'),
   ('payment_bank_account', '123-456-7890', 'Nomor Rekening Pembayaran Cashless'),
   ('payment_account_name', 'Hotel Celebes Hasanuddin', 'Atas Nama Rekening Pembayaran Cashless')

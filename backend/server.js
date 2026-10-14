@@ -284,29 +284,51 @@ app.get('/api/settings/public', async (req, res) => {
 
 // Register
 app.post('/api/auth/register', async (req, res) => {
+  const connection = await pool.getConnection();
   try {
+    await connection.beginTransaction();
     const { name, phone, email, password, birth_date } = req.body;
     if (!name || !phone || !password) {
+      await connection.rollback();
       return res.status(400).json({ success: false, message: 'Nama, No WhatsApp/HP, dan password wajib diisi' });
     }
 
     const cleanPhone = phone.trim().replace(/^0/, '62').replace(/[^\d]/g, '');
 
     // Check existing phone
-    const [existing] = await pool.query('SELECT id FROM users WHERE phone = ?', [cleanPhone]);
+    const [existing] = await connection.query('SELECT id FROM users WHERE phone = ?', [cleanPhone]);
     if (existing.length > 0) {
+      await connection.rollback();
       return res.status(400).json({ success: false, message: 'Nomor telepon sudah terdaftar sebagai member' });
     }
+
+    // Get Welcome Points from settings (default: 10 points)
+    const settingsMap = await getSettingsMap();
+    const welcomePoints = parseInt(settingsMap.welcome_points || '10');
+    const expiryDays = parseInt(settingsMap.point_expiry_days || '365');
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + expiryDays);
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const memberCode = await generateMemberCode();
 
-    const [insertResult] = await pool.query(
+    const [insertResult] = await connection.query(
       'INSERT INTO users (name, phone, email, birth_date, password, role, member_code, total_points) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name.trim(), cleanPhone, email ? email.trim() : null, birth_date || null, hashedPassword, 'member', memberCode, 0]
+      [name.trim(), cleanPhone, email ? email.trim() : null, birth_date || null, hashedPassword, 'member', memberCode, welcomePoints]
     );
 
     const userId = insertResult.insertId;
+
+    // Record welcome bonus in point_ledger (FIFO)
+    if (welcomePoints > 0) {
+      await connection.query(
+        `INSERT INTO point_ledger (user_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description)
+         VALUES (?, ?, ?, NOW(), ?, 0, 'bonus', 'Welcome Bonus: Registrasi Member Baru')`,
+        [userId, welcomePoints, welcomePoints, expiryDate]
+      );
+    }
+
+    await connection.commit();
 
     // Generate token
     const token = jwt.sign(
@@ -317,14 +339,26 @@ app.post('/api/auth/register', async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Registrasi berhasil! Selamat bergabung di Royalti Reward HCH',
+      message: `Registrasi berhasil! Selamat bergabung, Anda mendapatkan bonus ${welcomePoints} Welcome Points.`,
       data: {
         token,
-        user: { id: userId, name: name.trim(), phone: cleanPhone, email, birth_date: birth_date || null, role: 'member', member_code: memberCode, total_points: 0 }
-      }
+        user: {
+          id: userId,
+          name: name.trim(),
+          phone: cleanPhone,
+          email,
+          birth_date: birth_date || null,
+          role: 'member',
+          member_code: memberCode,
+          total_points: welcomePoints,
+        },
+      },
     });
   } catch (err) {
+    await connection.rollback();
     res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release();
   }
 });
 
@@ -947,7 +981,9 @@ app.post('/api/member/reservations', async (req, res) => {
     const baseTotal = roomPrice * nights * parseInt(num_rooms);
 
     const settings = await getSettingsMap();
-    const discountPercent = parseFloat(settings.hch_member_discount_percent) || 10;
+    const discountPercent = settings.hch_member_discount_percent !== undefined && settings.hch_member_discount_percent !== null && settings.hch_member_discount_percent !== ''
+      ? Math.max(0, Math.min(100, parseFloat(settings.hch_member_discount_percent)))
+      : 10;
     const discountAmount = Math.round(baseTotal * (discountPercent / 100));
     const finalTotal = Math.max(0, baseTotal - discountAmount);
 
@@ -956,15 +992,26 @@ app.post('/api/member/reservations', async (req, res) => {
       [userId, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, discountPercent, discountAmount, finalTotal, notes || null]
     );
 
+    const formatWaDate = (dateStr) => {
+      if (!dateStr) return '-';
+      const clean = String(dateStr).split('T')[0];
+      const parts = clean.split('-');
+      if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      return clean;
+    };
+
     const waNumber = settings.whatsapp_number || '6282189001285';
+    const discountHeader = discountPercent > 0 ? ` (Diskon Member ${discountPercent}%)` : '';
+    const discountEstimate = discountAmount > 0 ? ` (Hemat Diskon Rp ${Number(discountAmount).toLocaleString('id-ID')})` : '';
+
     const waText = encodeURIComponent(
-      `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin konfirmasi reservasi kamar via Aplikasi HCH (Diskon Member ${discountPercent}%):\n` +
+      `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin konfirmasi reservasi kamar via Aplikasi HCH${discountHeader}:\n` +
       `- Nama Tamu: ${guest_name}\n` +
       `- No. HP: ${guest_phone}\n` +
       `- Tipe Kamar: ${room_type} (${num_rooms} Kamar, ${nights} Malam)\n` +
-      `- Check-In: ${check_in}\n` +
-      `- Check-Out: ${check_out}\n` +
-      `- Estimasi Total: Rp ${Number(finalTotal).toLocaleString('id-ID')} (Hemat Diskon Rp ${Number(discountAmount).toLocaleString('id-ID')})\n` +
+      `- Check-In: ${formatWaDate(check_in)}\n` +
+      `- Check-Out: ${formatWaDate(check_out)}\n` +
+      `- Estimasi Total: Rp ${Number(finalTotal).toLocaleString('id-ID')}${discountEstimate}\n` +
       `${notes ? `- Catatan: ${notes}\n` : ''}` +
       `Mohon informasi nomor rekening / QRIS untuk pelunasan (cashless) sebelum check-in. Terima kasih!`
     );
@@ -981,6 +1028,133 @@ app.post('/api/member/reservations', async (req, res) => {
         whatsapp_url: waUrl
       }
     });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Member Get My Reservations
+app.get('/api/member/reservations', verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM reservations WHERE user_id = ? ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Member Update Reservation
+app.put('/api/member/reservations/:id', verifyToken, async (req, res) => {
+  try {
+    const [existing] = await pool.query(
+      'SELECT * FROM reservations WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ success: false, message: 'Data reservasi tidak ditemukan atau tidak memiliki akses' });
+    }
+
+    const { room_type, check_in, check_out, num_rooms = 1, num_guests = 2, notes } = req.body;
+    if (!room_type || !check_in || !check_out) {
+      return res.status(400).json({ success: false, message: 'Tipe kamar dan tanggal check-in/out wajib diisi' });
+    }
+
+    // Check closed dates (Blackout dates)
+    const [closedMatches] = await pool.query(
+      `SELECT reason, start_date, end_date FROM closed_dates 
+       WHERE is_closed = 1 
+       AND NOT (? >= end_date OR ? <= start_date)`,
+      [check_in, check_out]
+    );
+
+    if (closedMatches.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Reservasi tanggal tersebut saat ini ditutup (${closedMatches[0].reason}). Silakan pilih tanggal lain.`
+      });
+    }
+
+    // Recalculate price & discount
+    const [roomRows] = await pool.query('SELECT price FROM rooms WHERE name = ?', [room_type]);
+    const roomPrice = roomRows.length > 0 ? parseFloat(roomRows[0].price) : 350000;
+    const d1 = new Date(check_in);
+    const d2 = new Date(check_out);
+    const nights = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
+    const baseTotal = roomPrice * nights * parseInt(num_rooms);
+
+    const settings = await getSettingsMap();
+    const discountPercent = settings.hch_member_discount_percent !== undefined && settings.hch_member_discount_percent !== null && settings.hch_member_discount_percent !== ''
+      ? Math.max(0, Math.min(100, parseFloat(settings.hch_member_discount_percent)))
+      : 10;
+    const discountAmount = Math.round(baseTotal * (discountPercent / 100));
+    const finalTotal = Math.max(0, baseTotal - discountAmount);
+
+    await pool.query(
+      `UPDATE reservations 
+       SET room_type = ?, check_in = ?, check_out = ?, num_rooms = ?, num_guests = ?, discount_percent = ?, discount_amount = ?, total_price = ?, notes = ?
+       WHERE id = ? AND user_id = ?`,
+      [room_type, check_in, check_out, num_rooms, num_guests, discountPercent, discountAmount, finalTotal, notes || null, req.params.id, req.user.id]
+    );
+
+    const formatWaDate = (dateStr) => {
+      if (!dateStr) return '-';
+      const clean = String(dateStr).split('T')[0];
+      const parts = clean.split('-');
+      if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      return clean;
+    };
+
+    const waNumber = settings.whatsapp_number || '6282189001285';
+    const discountHeader = discountPercent > 0 ? ` (Diskon Member ${discountPercent}%)` : '';
+    const discountEstimate = discountAmount > 0 ? ` (Hemat Diskon Rp ${Number(discountAmount).toLocaleString('id-ID')})` : '';
+
+    const waText = encodeURIComponent(
+      `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin mengonfirmasi perubahan data reservasi (Booking ID #${req.params.id}) via Aplikasi HCH${discountHeader}:\n` +
+      `- Nama Tamu: ${existing[0].guest_name}\n` +
+      `- No. HP: ${existing[0].guest_phone}\n` +
+      `- Tipe Kamar: ${room_type} (${num_rooms} Kamar, ${nights} Malam)\n` +
+      `- Check-In: ${formatWaDate(check_in)}\n` +
+      `- Check-Out: ${formatWaDate(check_out)}\n` +
+      `- Estimasi Total: Rp ${Number(finalTotal).toLocaleString('id-ID')}${discountEstimate}\n` +
+      `${notes ? `- Catatan: ${notes}\n` : ''}` +
+      `Mohon pembaruan informasi reservasi saya. Terima kasih!`
+    );
+    const waUrl = `https://wa.me/${waNumber}?text=${waText}`;
+
+    res.json({
+      success: true,
+      message: 'Perubahan reservasi berhasil disimpan!',
+      data: {
+        id: req.params.id,
+        discount_percent: discountPercent,
+        discount_amount: discountAmount,
+        total_price: finalTotal,
+        whatsapp_url: waUrl
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Member Delete / Cancel Reservation
+app.delete('/api/member/reservations/:id', verifyToken, async (req, res) => {
+  try {
+    const [existing] = await pool.query(
+      'SELECT id, status FROM reservations WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ success: false, message: 'Data reservasi tidak ditemukan atau tidak memiliki akses' });
+    }
+
+    await pool.query('DELETE FROM reservations WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ success: true, message: 'Reservasi berhasil dibatalkan / dihapus' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2196,6 +2370,15 @@ app.put('/api/admin/reservations/:id', verifyAdmin, async (req, res) => {
     const { status } = req.body;
     await pool.query('UPDATE reservations SET status = ? WHERE id = ?', [status, req.params.id]);
     res.json({ success: true, message: 'Status reservasi berhasil diperbarui' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/admin/reservations/:id', verifyAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM reservations WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Data reservasi berhasil dihapus' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

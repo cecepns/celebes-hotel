@@ -277,9 +277,13 @@ export const Home = () => {
               </p>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-              <div className="text-xs font-bold text-slate-800">Diskon Khusus APK</div>
+              <div className="text-xs font-bold text-slate-800">
+                {Number(settings.hch_member_discount_percent) > 0 ? 'Diskon Khusus APK' : 'Booking Langsung'}
+              </div>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                Diskon {settings.hch_member_discount_percent || 10}% saat reservasi via aplikasi HCH.
+                {Number(settings.hch_member_discount_percent) > 0
+                  ? `Diskon ${settings.hch_member_discount_percent}% saat reservasi via aplikasi HCH.`
+                  : 'Tarif resmi hotel & konfirmasi langsung via aplikasi HCH.'}
               </p>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">

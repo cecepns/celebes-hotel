@@ -26,6 +26,7 @@ export const AdminSettings = () => {
     point_expiry_days: '365',
     reservation_mode: 'whatsapp',
     hch_member_discount_percent: '10',
+    welcome_points: '10',
     whatsapp_number: '6282189001285',
     hotel_name: 'Hotel Celebes Hasanuddin',
     hotel_tagline: 'Royalti Reward HCH',
@@ -164,21 +165,78 @@ export const AdminSettings = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <Percent className="w-3.5 h-3.5 text-red-600" />
-                Diskon Member Reservasi via Aplikasi HCH (%)
-              </label>
-              <input
-                type="number"
-                required
-                min="0"
-                max="100"
-                value={settings.hch_member_discount_percent}
-                onChange={(e) => setSettings({ ...settings, hch_member_discount_percent: e.target.value })}
-                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-bold text-red-600"
-              />
-              <p className="text-[10px] text-slate-400 mt-1">
-                Persentase diskon harga kamar untuk tamu yang melakukan reservasi lewat aplikasi HCH.
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Percent className="w-3.5 h-3.5 text-red-600" />
+                  Diskon Musiman Reservasi via Aplikasi HCH (%)
+                </label>
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200">
+                  {Number(settings.hch_member_discount_percent) > 0 ? `${settings.hch_member_discount_percent}% Diskon Aktif` : '0% (Harga Normal)'}
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  max="100"
+                  value={settings.hch_member_discount_percent}
+                  onChange={(e) => setSettings({ ...settings, hch_member_discount_percent: e.target.value })}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-bold text-red-600"
+                />
+                <span className="absolute right-3.5 top-2.5 text-xs font-bold text-slate-400">%</span>
+              </div>
+
+              {/* Preset Tombol Cepat Sesuai Musim */}
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, hch_member_discount_percent: '10' })}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition ${
+                    settings.hch_member_discount_percent === '10'
+                      ? 'bg-red-50 border-red-500 text-red-700 ring-1 ring-red-500/30'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  🏖️ Reguler (10%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, hch_member_discount_percent: '0' })}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition ${
+                    settings.hch_member_discount_percent === '0'
+                      ? 'bg-amber-50 border-amber-500 text-amber-800 ring-1 ring-amber-500/30'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  🔥 High Season / Peak (0% - Harga Normal)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, hch_member_discount_percent: '15' })}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition ${
+                    settings.hch_member_discount_percent === '15'
+                      ? 'bg-emerald-50 border-emerald-500 text-emerald-700 ring-1 ring-emerald-500/30'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  🏷️ Low Season (15%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettings({ ...settings, hch_member_discount_percent: '20' })}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition ${
+                    settings.hch_member_discount_percent === '20'
+                      ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500/30'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  ⚡ Super Promo (20%)
+                </button>
+              </div>
+
+              <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
+                Persentase diskon harga kamar untuk pemesanan aplikasi. Fleksibel dapat diubah kapan saja sesuai musim hotel (Normal 10%, High/Peak Season 0%, Low Season 15-20%). Jika diisi <strong>0%</strong>, aplikasi akan menampilkan tarif resmi tanpa potongan diskon.
               </p>
             </div>
 
@@ -196,6 +254,24 @@ export const AdminSettings = () => {
               />
               <p className="text-[10px] text-slate-400 mt-1">
                 Default: 365 hari (1 tahun dari tanggal perolehan transaksi)
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <Coins className="w-3.5 h-3.5 text-amber-500" />
+                Welcome Points Member Baru (Poin Otomatis)
+              </label>
+              <input
+                type="number"
+                required
+                min="0"
+                value={settings.welcome_points || '10'}
+                onChange={(e) => setSettings({ ...settings, welcome_points: e.target.value })}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-bold text-amber-600"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Poin gratis yang langsung otomatis masuk ke akun member baru saat selesai registrasi.
               </p>
             </div>
 

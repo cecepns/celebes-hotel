@@ -29,6 +29,7 @@ export const API_ENDPOINTS = {
     CLAIM_MISSION: (id) => `/member/missions/${id}/claim`,
     TRANSACTIONS: '/member/transactions',
     RESERVATIONS: '/member/reservations',
+    RESERVATION_ITEM: (id) => `/member/reservations/${id}`,
   },
   ADMIN: {
     DASHBOARD: '/admin/dashboard',
@@ -79,6 +80,7 @@ export const API_ENDPOINTS = {
     RESERVATIONS: {
       LIST: '/admin/reservations',
       UPDATE: (id) => `/admin/reservations/${id}`,
+      DELETE: (id) => `/admin/reservations/${id}`,
     },
     CLOSED_DATES: {
       LIST: '/admin/closed-dates',

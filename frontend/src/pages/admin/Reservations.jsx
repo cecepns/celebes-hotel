@@ -23,6 +23,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Pagination } from '@/components/common/Pagination';
 import { TableSkeleton } from '@/components/common/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -53,6 +54,16 @@ export const AdminReservations = () => {
     reason: '',
   });
   const [addingClosedDate, setAddingClosedDate] = useState(false);
+
+  // Seasonal Discount State & Modal
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [discountPercent, setDiscountPercent] = useState('10');
+  const [savingDiscount, setSavingDiscount] = useState(false);
+
+  // Delete Reservation Dialog State
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [reservationToDelete, setReservationToDelete] = useState(null);
+  const [deletingLoading, setDeletingLoading] = useState(false);
 
   // Cashless Bank Account Settings for WhatsApp Draft
   const [bankSettings, setBankSettings] = useState({
@@ -118,9 +129,12 @@ export const AdminReservations = () => {
 
   useEffect(() => {
     fetchReservations(1, pagination.limit);
-    // Fetch public bank settings for WhatsApp draft
+    // Fetch public settings for WhatsApp draft and seasonal discount
     request.get(API_ENDPOINTS.SETTINGS.PUBLIC).then((res) => {
       if (res.success && res.data) {
+        if (res.data.hch_member_discount_percent !== undefined && res.data.hch_member_discount_percent !== null) {
+          setDiscountPercent(String(res.data.hch_member_discount_percent));
+        }
         setBankSettings({
           payment_bank_name: res.data.payment_bank_name || 'Bank BCA',
           payment_bank_account: res.data.payment_bank_account || '123-456-7890',
@@ -129,6 +143,53 @@ export const AdminReservations = () => {
       }
     }).catch(() => {});
   }, [debouncedSearch, statusFilter]);
+
+  const handleSaveDiscount = async (e) => {
+    e.preventDefault();
+    try {
+      setSavingDiscount(true);
+      const res = await request.put(API_ENDPOINTS.ADMIN.SETTINGS.UPDATE, {
+        settings: [
+          { setting_key: 'hch_member_discount_percent', setting_value: String(discountPercent) },
+        ],
+      });
+      if (res.success) {
+        toast.success(`Diskon reservasi berhasil diupdate menjadi ${discountPercent}%`);
+        setDiscountModalOpen(false);
+      } else {
+        toast.error(res.message || 'Gagal menyimpan diskon');
+      }
+    } catch (err) {
+      toast.error('Gagal memperbarui diskon reservasi');
+    } finally {
+      setSavingDiscount(false);
+    }
+  };
+
+  const handleOpenDelete = (r) => {
+    setReservationToDelete(r);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!reservationToDelete) return;
+    try {
+      setDeletingLoading(true);
+      const res = await request.delete(API_ENDPOINTS.ADMIN.RESERVATIONS.DELETE(reservationToDelete.id));
+      if (res.success) {
+        toast.success('Data reservasi berhasil dihapus');
+        setDeleteConfirmOpen(false);
+        setReservationToDelete(null);
+        fetchReservations(pagination.page, pagination.limit);
+      } else {
+        toast.error(res.message || 'Gagal menghapus data reservasi');
+      }
+    } catch (err) {
+      toast.error('Gagal menghapus data reservasi');
+    } finally {
+      setDeletingLoading(false);
+    }
+  };
 
   const handleOpenClosedDates = () => {
     fetchClosedDates();
@@ -239,45 +300,91 @@ export const AdminReservations = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleOpenClosedDates}
-          className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 self-start sm:self-auto"
-        >
-          <CalendarX className="w-4 h-4 text-amber-400" />
-          <span>Buka / Tutup Tanggal Reservasi</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setDiscountModalOpen(true)}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+            title="Ubah diskon reservasi kamar sesuai musim hotel"
+          >
+            <Percent className="w-4 h-4 text-red-200" />
+            <span>Diskon Musim: {Number(discountPercent) > 0 ? `${discountPercent}%` : '0% (Harga Normal)'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenClosedDates}
+            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2"
+          >
+            <CalendarX className="w-4 h-4 text-amber-400" />
+            <span>Buka / Tutup Tanggal</span>
+          </button>
+        </div>
       </div>
 
-      {/* Banner Panduan Blokir Tanggal Reservasi */}
-      <div className="p-4 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border-l-4 border-amber-500 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
-        <div className="flex items-start gap-3">
-          <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-xs">
-            <CalendarX className="w-5 h-5 text-slate-950" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                Lokasi Blokir Tanggal Reservasi (Blackout Dates)
-              </h4>
-              <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 font-extrabold text-[10px]">
-                Fitur Aktif
-              </span>
+      {/* Banner Panduan Blokir Tanggal & Diskon Musiman */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* Card 1: Tanggal Tertutup */}
+        <div className="p-4 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border-l-4 border-amber-500 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-xs">
+              <CalendarX className="w-5 h-5 text-slate-950" />
             </div>
-            <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-              Ingin menutup/memblokir tanggal reservasi (misal: <strong>Malam Tahun Baru</strong>, renovasi, atau belum ada harga resmi)? Klik tombol di samping untuk menambah atau menghapus periode tanggal tertutup.
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                  Blokir Tanggal Reservasi
+                </h4>
+                <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 font-extrabold text-[10px]">
+                  Blackout
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                Tutup tanggal tertentu (misal: Malam Tahun Baru, renovasi, atau belum ada rilis harga resmi).
+              </p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={handleOpenClosedDates}
+            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 rounded-xl text-xs font-extrabold shadow-sm transition flex items-center gap-1.5 shrink-0 active:scale-95"
+          >
+            <CalendarX className="w-3.5 h-3.5 text-amber-400" />
+            <span>Kelola ➔</span>
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={handleOpenClosedDates}
-          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 rounded-xl text-xs font-extrabold shadow-sm transition flex items-center gap-2 shrink-0 self-start md:self-auto active:scale-95"
-        >
-          <CalendarX className="w-4 h-4 text-amber-400" />
-          <span>Kelola Tanggal Tertutup ➔</span>
-        </button>
+        {/* Card 2: Diskon Musiman */}
+        <div className="p-4 bg-gradient-to-r from-red-500/15 via-red-500/5 to-transparent border-l-4 border-red-500 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-red-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+              <Percent className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                  Diskon Musiman Reservasi
+                </h4>
+                <span className="px-2 py-0.5 rounded-md bg-red-100 text-red-700 font-extrabold text-[10px]">
+                  {Number(discountPercent) > 0 ? `${discountPercent}% Aktif` : '0% (Tanpa Diskon)'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                Sesuaikan diskon dengan musim hotel (Reguler 10%, High/Peak Season 0%, Low Season 15-20%).
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setDiscountModalOpen(true)}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-extrabold shadow-sm transition flex items-center gap-1.5 shrink-0 active:scale-95"
+          >
+            <Percent className="w-3.5 h-3.5 text-white" />
+            <span>Ubah Diskon ➔</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter & Search */}
@@ -398,14 +505,26 @@ export const AdminReservations = () => {
                       />
                     </td>
                     <td className="py-3 px-4 text-center whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => handleChatGuest(r)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" />
-                        <span>Chat WA & Minta Pelunasan</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleChatGuest(r)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                          title="Chat Tamu via WhatsApp"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>Chat WA</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDelete(r)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-xl transition border border-transparent hover:border-red-200"
+                          title="Hapus data reservasi"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -518,7 +637,7 @@ export const AdminReservations = () => {
                         )}
                       </div>
                       <div className="text-slate-500 text-[11px] mt-0.5">
-                        Periode: {new Date(item.start_date).toLocaleDateString('id-ID')} s/d {new Date(item.end_date).toLocaleDateString('id-ID')}
+                        Periode: {formatDateDMY(item.start_date)} s/d {formatDateDMY(item.end_date)}
                       </div>
                     </div>
 
@@ -563,6 +682,130 @@ export const AdminReservations = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Modal Pengaturan Diskon Musiman */}
+      <Modal
+        isOpen={discountModalOpen}
+        onClose={() => setDiscountModalOpen(false)}
+        title="Pengaturan Diskon Musiman Kamar (Aplikasi HCH)"
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleSaveDiscount} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Pilih Cepat Sesuai Musim Hotel:
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDiscountPercent('10')}
+                className={`p-2.5 rounded-xl border text-left transition ${
+                  discountPercent === '10'
+                    ? 'border-red-500 bg-red-50/60 text-red-900 ring-2 ring-red-500/20 shadow-2xs'
+                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div className="text-xs font-black text-red-700">🏖️ Reguler (10%)</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Musim standar hotel</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDiscountPercent('0')}
+                className={`p-2.5 rounded-xl border text-left transition ${
+                  discountPercent === '0'
+                    ? 'border-amber-500 bg-amber-50/60 text-amber-900 ring-2 ring-amber-500/20 shadow-2xs'
+                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div className="text-xs font-black text-amber-700">🔥 Peak / High (0%)</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Tahun Baru / Liburan (Harga Normal)</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDiscountPercent('15')}
+                className={`p-2.5 rounded-xl border text-left transition ${
+                  discountPercent === '15'
+                    ? 'border-emerald-500 bg-emerald-50/60 text-emerald-900 ring-2 ring-emerald-500/20 shadow-2xs'
+                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div className="text-xs font-black text-emerald-700">🏷️ Low Season (15%)</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Promo tingkat hunian</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDiscountPercent('20')}
+                className={`p-2.5 rounded-xl border text-left transition ${
+                  discountPercent === '20'
+                    ? 'border-blue-500 bg-blue-50/60 text-blue-900 ring-2 ring-blue-500/20 shadow-2xs'
+                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div className="text-xs font-black text-blue-700">⚡ Super Promo (20%)</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Event khusus hotel</div>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Atau Masukkan Persentase Kustom (%):
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                required
+                value={discountPercent}
+                onChange={(e) => setDiscountPercent(e.target.value)}
+                className="w-full text-sm font-bold p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-red-600"
+                placeholder="0"
+              />
+              <span className="absolute right-3.5 top-2.5 text-sm font-bold text-slate-400">%</span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+              {Number(discountPercent) === 0
+                ? 'ℹ️ Nilai 0% berarti tidak ada potongan diskon kamar (tamu membayar harga normal penuh).'
+                : `ℹ️ Tamu akan mendapatkan potongan diskon ${discountPercent}% saat memesan lewat aplikasi.`}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setDiscountModalOpen(false)}
+              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-600 transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={savingDiscount}
+              className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Percent className="w-3.5 h-3.5" />
+              <span>{savingDiscount ? 'Menyimpan...' : 'Simpan Diskon Musim'}</span>
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Confirm Dialog Hapus Reservasi */}
+      <ConfirmDialog
+        isOpen={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={handleConfirmDelete}
+        isLoading={deletingLoading}
+        title="Hapus Data Reservasi"
+        message={`Apakah Anda yakin ingin menghapus data reservasi #${reservationToDelete?.id} atas nama ${reservationToDelete?.guest_name} (${reservationToDelete?.room_type})?`}
+        confirmText="Ya, Hapus Data"
+        cancelText="Batal"
+        isDanger={true}
+      />
     </div>
   );
 };
