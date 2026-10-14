@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   TrendingUp,
   History,
+  Info,
 } from 'lucide-react';
 import { Skeleton } from '@/components/common/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -87,6 +88,14 @@ export const PointsDetail = () => {
               {expiring30Days.toLocaleString('id-ID')} Poin
             </span>
           </div>
+        </div>
+
+        {/* Catatan Ketentuan Poin */}
+        <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-2.5 text-xs text-amber-950">
+          <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            <strong className="text-amber-900">Ketentuan Poin:</strong> Poin Royalti HCH hanya dapat digunakan untuk penukaran voucher / reward di katalog dan <strong>tidak dapat diuangkan atau ditunaikan</strong>.
+          </p>
         </div>
 
         {/* Schedule of Points Batches */}

@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Info,
   ExternalLink,
+  Building2,
 } from 'lucide-react';
 
 export const Home = () => {
@@ -270,9 +271,9 @@ export const Home = () => {
               </p>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-              <div className="text-xs font-bold text-slate-800">Tukar Voucher</div>
+              <div className="text-xs font-bold text-slate-800">Tukar Reward</div>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                Tukar poin dengan diskon, free room upgrade & free night.
+                Poin khusus penukaran voucher reward (tidak dapat diuangkan / ditunaikan).
               </p>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
@@ -308,22 +309,26 @@ export const Home = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-2 pt-1 text-center">
+          <div className="grid grid-cols-5 gap-1.5 pt-1 text-center">
             <div className="bg-white/10 p-2 rounded-xl">
-              <Bed className="w-4 h-4 mx-auto mb-1 text-blue-300" />
-              <div className="text-[10px] font-semibold">Menginap</div>
+              <Building2 className="w-4 h-4 mx-auto mb-1 text-blue-300" />
+              <div className="text-[9px] sm:text-[10px] font-semibold">Menginap</div>
+            </div>
+            <div className="bg-white/10 p-2 rounded-xl">
+              <Bed className="w-4 h-4 mx-auto mb-1 text-indigo-300" />
+              <div className="text-[9px] sm:text-[10px] font-semibold whitespace-nowrap">Extra Bed</div>
             </div>
             <div className="bg-white/10 p-2 rounded-xl">
               <Utensils className="w-4 h-4 mx-auto mb-1 text-amber-300" />
-              <div className="text-[10px] font-semibold">F&B Resto</div>
+              <div className="text-[9px] sm:text-[10px] font-semibold">F&B Resto</div>
             </div>
             <div className="bg-white/10 p-2 rounded-xl">
               <ShoppingBag className="w-4 h-4 mx-auto mb-1 text-emerald-300" />
-              <div className="text-[10px] font-semibold">Drugstore</div>
+              <div className="text-[9px] sm:text-[10px] font-semibold">Drugstore</div>
             </div>
             <div className="bg-white/10 p-2 rounded-xl">
               <Shirt className="w-4 h-4 mx-auto mb-1 text-cyan-300" />
-              <div className="text-[10px] font-semibold">Laundry</div>
+              <div className="text-[9px] sm:text-[10px] font-semibold">Laundry</div>
             </div>
           </div>
 
@@ -332,6 +337,17 @@ export const Home = () => {
             Transaksi Rp {exampleAmount.toLocaleString('id-ID')} = {exampleUnits} kelipatan ({(exampleUnits * unitAmount).toLocaleString('id-ID')}) &times; {pointsPerUnit} point ={' '}
             <span className="text-amber-300 font-bold">{examplePoints} Point</span>.
             {exampleLeftover > 0 && ` Sisa Rp ${exampleLeftover.toLocaleString('id-ID')} belum mencapai batas kelipatan.`}
+          </div>
+
+          {/* Ketentuan: Poin Hanya untuk Reward & Tidak Dapat Ditunaikan */}
+          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/15 border border-amber-400/30 text-amber-200 text-[11px] leading-relaxed">
+            <Info className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold text-amber-300 uppercase tracking-wide text-[10px] block mb-0.5">
+                Ketentuan Penukaran Poin:
+              </span>
+              Poin ini <strong>hanya berlaku untuk penukaran reward / voucher</strong> di katalog (seperti diskon kamar, F&B, drugstore, laundry, upgrade kamar, dan kamar gratis) serta <strong>tidak dapat diuangkan / ditunaikan</strong> dalam bentuk tunai.
+            </div>
           </div>
         </section>
 
