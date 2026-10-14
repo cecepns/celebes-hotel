@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, Outlet, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster } from 'react-hot-toast';
 

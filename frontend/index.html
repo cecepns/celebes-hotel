@@ -5,6 +5,9 @@
     <link rel="icon" type="image/jpeg" href="/logo-hch.jpeg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0f2027" />
+    
+    <!-- PWA Mobile Web App Capable (Standard & Apple iOS) -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Royalti HCH" />
@@ -18,15 +21,79 @@
 
     <title>Royalti Reward HCH - Hotel Celebes Hasanuddin</title>
     <meta name="description" content="Program Keanggotaan Eksklusif Royalti Reward HCH Hotel Celebes Hasanuddin Makassar. Stay • Collect • Redeem" />
+
+    <!-- Anti-Blank Screen & Stale Deployment Auto-Recovery Script -->
+    <script>
+      (function() {
+        // Reset reload attempt flag once page successfully mounts
+        window.addEventListener('load', function() {
+          setTimeout(function() {
+            sessionStorage.removeItem('vite_chunk_reload_lock');
+          }, 3000);
+        });
+
+        // Auto-reload if dynamic chunk fails to load due to new deployment
+        window.addEventListener('vite:preloadError', function(event) {
+          event.preventDefault();
+          if (!sessionStorage.getItem('vite_chunk_reload_lock')) {
+            sessionStorage.setItem('vite_chunk_reload_lock', '1');
+            console.warn('[Vite] Preload error detected after new deployment, reloading...');
+            window.location.reload();
+          }
+        });
+
+        // Intercept MIME type error / module script failure
+        window.addEventListener('error', function(e) {
+          var msg = (e && e.message) ? e.message : '';
+          var isScriptMimeError = msg.indexOf('Failed to load module script') !== -1 ||
+                                  msg.indexOf('Expected a JavaScript-or-Wasm module script') !== -1 ||
+                                  msg.indexOf('MIME type') !== -1;
+          var isChunkScript = e.target && e.target.tagName === 'SCRIPT' && e.target.src && e.target.src.indexOf('/assets/') !== -1;
+
+          if (isScriptMimeError || isChunkScript) {
+            if (!sessionStorage.getItem('vite_chunk_reload_lock')) {
+              sessionStorage.setItem('vite_chunk_reload_lock', '1');
+              console.warn('[App] Outdated script detected, refreshing to latest version...');
+              window.location.reload();
+            }
+          }
+        }, true);
+      })();
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 font-sans antialiased selection:bg-red-500 selection:text-white">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>
+      // Service Worker Registration with Immediate Update Check & Auto-Refresh
       if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch((err) => {
+          navigator.serviceWorker.register('/sw.js').then((registration) => {
+            // Check for new worker update on load
+            registration.update();
+
+            registration.onupdatefound = () => {
+              const newWorker = registration.installing;
+              if (newWorker) {
+                newWorker.onstatechange = () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // Tell worker to skip waiting
+                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                  }
+                };
+              }
+            };
+          }).catch((err) => {
             console.log('SW registration error:', err);
+          });
+
+          // Refresh page when new controller takes over
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!refreshing) {
+              refreshing = true;
+              window.location.reload();
+            }
           });
         });
       }
