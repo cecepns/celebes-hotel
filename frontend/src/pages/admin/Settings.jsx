@@ -13,6 +13,7 @@ import {
   Calculator,
   CalendarX,
   Sparkles,
+  CreditCard,
 } from 'lucide-react';
 import { Select } from '@/components/common/Select';
 import { Link } from 'react-router-dom';
@@ -31,6 +32,9 @@ export const AdminSettings = () => {
     hotel_address: 'Jl. Sultan Hasanuddin No. 2 Makassar',
     hotel_phone: '+62411 3620770',
     instagram_username: 'celebeshtl',
+    payment_bank_name: 'Bank BCA',
+    payment_bank_account: '123-456-7890',
+    payment_account_name: 'Hotel Celebes Hasanuddin',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -369,6 +373,64 @@ export const AdminSettings = () => {
                 onChange={(e) => setSettings({ ...settings, hotel_address: e.target.value })}
                 className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3: Rekening Pembayaran Cashless Reservasi */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
+              <CreditCard className="w-4 h-4 text-emerald-600" />
+              Rekening Bank Pembayaran Cashless (Untuk Draf Pesan WhatsApp Reservasi)
+            </h3>
+            <p className="text-xs text-slate-500 mt-2">
+              Informasi rekening resmi ini akan otomatis tercantum pada draf pesan WhatsApp saat staf resepsionis menekan tombol <strong>"Chat WA & Minta Pelunasan"</strong> di menu Reservasi.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Nama Bank</label>
+              <input
+                type="text"
+                placeholder="Contoh: Bank BCA / Mandiri / BRI"
+                value={settings.payment_bank_name || ''}
+                onChange={(e) => setSettings({ ...settings, payment_bank_name: e.target.value })}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Nomor Rekening</label>
+              <input
+                type="text"
+                placeholder="Contoh: 123-456-7890"
+                value={settings.payment_bank_account || ''}
+                onChange={(e) => setSettings({ ...settings, payment_bank_account: e.target.value })}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-mono font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Atas Nama Rekening (a/n)</label>
+              <input
+                type="text"
+                placeholder="Contoh: Hotel Celebes Hasanuddin"
+                value={settings.payment_account_name || ''}
+                onChange={(e) => setSettings({ ...settings, payment_account_name: e.target.value })}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+              />
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl text-xs text-emerald-950">
+            <span className="font-extrabold flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              Pratinjau Teks Rekening di WhatsApp:
+            </span>
+            <div className="mt-1.5 font-mono text-xs bg-white p-2.5 rounded-lg border border-emerald-200 text-slate-800 shadow-2xs">
+              {settings.payment_bank_name || 'Bank BCA'}: {settings.payment_bank_account || '123-456-7890'} a/n {settings.payment_account_name || 'Hotel Celebes Hasanuddin'}
             </div>
           </div>
         </div>

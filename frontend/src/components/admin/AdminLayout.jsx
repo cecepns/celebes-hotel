@@ -31,7 +31,7 @@ export const AdminLayout = () => {
     { to: '/admin/users', label: 'Manajemen User', icon: UserCog, roles: ['admin'] },
     { to: '/admin/members', label: 'Data Tamu / Member', icon: Users },
     { to: '/admin/rooms', label: 'Kelola Kamar', icon: Bed },
-    { to: '/admin/reservations', label: 'Data Reservasi', icon: CalendarDays },
+    { to: '/admin/reservations', label: 'Reservasi & Blokir Tgl', icon: CalendarDays },
     { to: '/admin/transactions', label: 'Transaksi & Poin', icon: Receipt },
     { to: '/admin/rewards', label: 'Katalog Reward', icon: Gift },
     { to: '/admin/missions', label: 'Misi & Approval Klaim', icon: Trophy, roles: ['admin', 'supervisor'] },

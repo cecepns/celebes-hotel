@@ -54,6 +54,24 @@ export const AdminReservations = () => {
   });
   const [addingClosedDate, setAddingClosedDate] = useState(false);
 
+  // Cashless Bank Account Settings for WhatsApp Draft
+  const [bankSettings, setBankSettings] = useState({
+    payment_bank_name: 'Bank BCA',
+    payment_bank_account: '123-456-7890',
+    payment_account_name: 'Hotel Celebes Hasanuddin',
+  });
+
+  // Helper format DD-MM-YYYY (e.g. 20-11-2026)
+  const formatDateDMY = (dateStr) => {
+    if (!dateStr) return '-';
+    const clean = String(dateStr).split('T')[0];
+    const parts = clean.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return clean;
+  };
+
   const searchTimeoutRef = useRef(null);
   const handleSearchChange = (e) => {
     const val = e.target.value;
@@ -100,6 +118,16 @@ export const AdminReservations = () => {
 
   useEffect(() => {
     fetchReservations(1, pagination.limit);
+    // Fetch public bank settings for WhatsApp draft
+    request.get(API_ENDPOINTS.SETTINGS.PUBLIC).then((res) => {
+      if (res.success && res.data) {
+        setBankSettings({
+          payment_bank_name: res.data.payment_bank_name || 'Bank BCA',
+          payment_bank_account: res.data.payment_bank_account || '123-456-7890',
+          payment_account_name: res.data.payment_account_name || 'Hotel Celebes Hasanuddin',
+        });
+      }
+    }).catch(() => {});
   }, [debouncedSearch, statusFilter]);
 
   const handleOpenClosedDates = () => {
@@ -179,11 +207,20 @@ export const AdminReservations = () => {
     const cleanPhone = r.guest_phone.replace(/^0/, '62').replace(/[^\d]/g, '');
     const priceText = r.total_price ? `Rp ${Number(r.total_price).toLocaleString('id-ID')}` : '-';
     const discountText = r.discount_percent > 0 ? ` (Sudah termasuk Diskon Member HCH ${r.discount_percent}%)` : '';
-    
+    const checkInFormatted = formatDateDMY(r.check_in);
+    const checkOutFormatted = formatDateDMY(r.check_out);
+    const bankText = `${bankSettings.payment_bank_name || 'Bank BCA'}: ${bankSettings.payment_bank_account || '123-456-7890'} a/n ${bankSettings.payment_account_name || 'Hotel Celebes Hasanuddin'}`;
+
     const text = encodeURIComponent(
-      `Halo ${r.guest_name},\nKami dari Resepsionis Hotel Celebes Hasanuddin Makassar mengonfirmasi reservasi kamar ${r.room_type} untuk periode ${r.check_in} s/d ${r.check_out} via aplikasi HCH.\n\n` +
-      `Detail Pemesanan:\n- Jumlah Kamar: ${r.num_rooms}\n- Jumlah Tamu: ${r.num_guests}\n- Total Pembayaran Cashless: ${priceText}${discountText}\n\n` +
-      `Untuk mengonfirmasi dan mengamankan kamar Anda, mohon lakukan pelunasan cashless via transfer sebelum check-in ke rekening resmi kami:\nBank BCA: 123-456-7890 a/n Hotel Celebes Hasanuddin\n\nTerima kasih atas kepercayaannya!`
+      `Halo ${r.guest_name},\n` +
+      `Kami dari Resepsionis Hotel Celebes Hasanuddin Makassar mengonfirmasi reservasi kamar ${r.room_type} untuk periode ${checkInFormatted} s/d ${checkOutFormatted} via aplikasi HCH.\n\n` +
+      `Detail Pemesanan:\n` +
+      `- Jumlah Kamar: ${r.num_rooms}\n` +
+      `- Jumlah Tamu: ${r.num_guests}\n` +
+      `- Total Pembayaran Cashless: ${priceText}${discountText}\n\n` +
+      `Untuk mengonfirmasi dan mengamankan kamar Anda, mohon lakukan pelunasan cashless via transfer sebelum check-in ke rekening resmi kami:\n` +
+      `${bankText}\n\n` +
+      `Terima kasih atas kepercayaannya!`
     );
     window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
   };
@@ -205,10 +242,41 @@ export const AdminReservations = () => {
         <button
           type="button"
           onClick={handleOpenClosedDates}
-          className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 self-start sm:self-auto"
+          className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 self-start sm:self-auto"
         >
           <CalendarX className="w-4 h-4 text-amber-400" />
           <span>Buka / Tutup Tanggal Reservasi</span>
+        </button>
+      </div>
+
+      {/* Banner Panduan Blokir Tanggal Reservasi */}
+      <div className="p-4 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border-l-4 border-amber-500 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-xs">
+            <CalendarX className="w-5 h-5 text-slate-950" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                Lokasi Blokir Tanggal Reservasi (Blackout Dates)
+              </h4>
+              <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 font-extrabold text-[10px]">
+                Fitur Aktif
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+              Ingin menutup/memblokir tanggal reservasi (misal: <strong>Malam Tahun Baru</strong>, renovasi, atau belum ada harga resmi)? Klik tombol di samping untuk menambah atau menghapus periode tanggal tertutup.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleOpenClosedDates}
+          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 rounded-xl text-xs font-extrabold shadow-sm transition flex items-center gap-2 shrink-0 self-start md:self-auto active:scale-95"
+        >
+          <CalendarX className="w-4 h-4 text-amber-400" />
+          <span>Kelola Tanggal Tertutup ➔</span>
         </button>
       </div>
 
@@ -290,10 +358,12 @@ export const AdminReservations = () => {
                         {r.num_rooms} Kamar • {r.num_guests} Tamu
                       </div>
                     </td>
-                    <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
-                      <div className="font-medium">
-                        {new Date(r.check_in).toLocaleDateString('id-ID')} s/d{' '}
-                        {new Date(r.check_out).toLocaleDateString('id-ID')}
+                    <td className="py-3 px-4 text-slate-700 whitespace-nowrap">
+                      <div className="font-bold text-slate-800">
+                        {formatDateDMY(r.check_in)}
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-medium">
+                        s/d {formatDateDMY(r.check_out)}
                       </div>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">

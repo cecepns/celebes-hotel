@@ -55,6 +55,78 @@ const pool = mysql.createPool({
   timezone: '+00:00'
 });
 
+// Auto-verify and upgrade schema if columns are missing
+const initSchemaUpdates = async () => {
+  try {
+    // 1. user_missions columns
+    const [umCols] = await pool.query('SHOW COLUMNS FROM user_missions');
+    const umExisting = umCols.map(c => c.Field.toLowerCase());
+
+    if (!umExisting.includes('created_at')) {
+      await pool.query('ALTER TABLE user_missions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+      console.log('✅ Added created_at to user_missions');
+    }
+    if (!umExisting.includes('room_number')) {
+      await pool.query('ALTER TABLE user_missions ADD COLUMN room_number VARCHAR(50) NULL');
+      console.log('✅ Added room_number to user_missions');
+    }
+    if (!umExisting.includes('admin_note')) {
+      await pool.query('ALTER TABLE user_missions ADD COLUMN admin_note VARCHAR(255) NULL');
+      console.log('✅ Added admin_note to user_missions');
+    }
+    if (!umExisting.includes('proof_note')) {
+      await pool.query('ALTER TABLE user_missions ADD COLUMN proof_note VARCHAR(255) NULL');
+      console.log('✅ Added proof_note to user_missions');
+    }
+    if (!umExisting.includes('proof_file')) {
+      await pool.query('ALTER TABLE user_missions ADD COLUMN proof_file VARCHAR(255) NULL');
+      console.log('✅ Added proof_file to user_missions');
+    }
+    if (!umExisting.includes('awarded_at')) {
+      await pool.query('ALTER TABLE user_missions ADD COLUMN awarded_at DATETIME NULL');
+      console.log('✅ Added awarded_at to user_missions');
+    }
+
+    // 2. users columns
+    const [uCols] = await pool.query('SHOW COLUMNS FROM users');
+    const uExisting = uCols.map(c => c.Field.toLowerCase());
+    if (!uExisting.includes('birth_date')) {
+      await pool.query('ALTER TABLE users ADD COLUMN birth_date DATE NULL AFTER email');
+      console.log('✅ Added birth_date to users');
+    }
+
+    // 3. reservations columns
+    const [rCols] = await pool.query('SHOW COLUMNS FROM reservations');
+    const rExisting = rCols.map(c => c.Field.toLowerCase());
+    if (!rExisting.includes('discount_percent')) {
+      await pool.query('ALTER TABLE reservations ADD COLUMN discount_percent DECIMAL(5,2) DEFAULT 0');
+    }
+    if (!rExisting.includes('discount_amount')) {
+      await pool.query('ALTER TABLE reservations ADD COLUMN discount_amount DECIMAL(15,2) DEFAULT 0');
+    }
+    if (!rExisting.includes('total_price')) {
+      await pool.query('ALTER TABLE reservations ADD COLUMN total_price DECIMAL(15,2) DEFAULT 0');
+    }
+    if (!rExisting.includes('source')) {
+      await pool.query("ALTER TABLE reservations ADD COLUMN source VARCHAR(50) DEFAULT 'app_hch'");
+    }
+
+    // 4. closed_dates table
+    await pool.query(`CREATE TABLE IF NOT EXISTS closed_dates (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      reason VARCHAR(255) NOT NULL,
+      is_closed TINYINT(1) DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_closed_dates (start_date, end_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+  } catch (err) {
+    console.warn('DB schema check:', err.message);
+  }
+};
+initSchemaUpdates();
+
 // Helper: Standard Pagination Response
 const formatPaginatedResponse = (data, page, limit, total) => {
   const numLimit = parseInt(limit);
@@ -729,10 +801,42 @@ app.post('/api/member/missions/:id/claim', verifyToken, upload.single('proof_fil
     const defaultNote = `Saya atas nama ${req.user.name} yg hari ini tanggal ${new Date().toLocaleDateString('id-ID')} telah cek in d No.kamar ${room_number || '-'} .`;
     const finalNote = proof_note ? proof_note.trim() : defaultNote;
 
-    // Record user mission with status 'pending'
+    // Record user mission with status 'pending' (dynamically check columns to prevent any Unknown Column errors)
+    const [cols] = await connection.query('SHOW COLUMNS FROM user_missions');
+    const colNames = cols.map(c => c.Field.toLowerCase());
+
+    const insertCols = ['user_id', 'mission_id', 'period_key', 'status'];
+    const insertVals = [userId, mission.id, periodKey, 'pending'];
+    const placeholders = ['?', '?', '?', '?'];
+
+    if (colNames.includes('proof_note')) {
+      insertCols.push('proof_note');
+      insertVals.push(finalNote);
+      placeholders.push('?');
+    }
+    if (colNames.includes('room_number')) {
+      insertCols.push('room_number');
+      insertVals.push(room_number || null);
+      placeholders.push('?');
+    }
+    if (colNames.includes('proof_file')) {
+      insertCols.push('proof_file');
+      insertVals.push(proofFile);
+      placeholders.push('?');
+    }
+    if (colNames.includes('created_at')) {
+      insertCols.push('created_at');
+      insertVals.push(new Date());
+      placeholders.push('?');
+    } else if (colNames.includes('awarded_at')) {
+      insertCols.push('awarded_at');
+      insertVals.push(new Date());
+      placeholders.push('?');
+    }
+
     await connection.query(
-      'INSERT INTO user_missions (user_id, mission_id, period_key, status, proof_note, room_number, proof_file, created_at) VALUES (?, ?, ?, "pending", ?, ?, ?, NOW())',
-      [userId, mission.id, periodKey, finalNote, room_number || null, proofFile]
+      `INSERT INTO user_missions (${insertCols.join(', ')}) VALUES (${placeholders.join(', ')})`,
+      insertVals
     );
 
     await connection.commit();
@@ -1837,7 +1941,7 @@ app.get('/api/admin/mission-claims', verifyAdmin, async (req, res) => {
        JOIN users u ON um.user_id = u.id
        JOIN missions m ON um.mission_id = m.id
        ${whereClause}
-       ORDER BY CASE WHEN um.status = 'pending' THEN 0 ELSE 1 END, um.created_at DESC
+       ORDER BY CASE WHEN um.status = 'pending' THEN 0 ELSE 1 END, um.id DESC
        LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), parseInt(offset)]
     );

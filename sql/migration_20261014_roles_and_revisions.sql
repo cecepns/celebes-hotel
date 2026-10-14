@@ -37,10 +37,14 @@ CREATE TABLE IF NOT EXISTS closed_dates (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------
--- 3. Tabel Settings: Pengaturan Diskon Member HCH
+-- 3. Tabel Settings: Pengaturan Diskon & Rekening Pembayaran Cashless
 -- ----------------------------------------------------------
 INSERT INTO settings (setting_key, setting_value, description)
-VALUES ('hch_member_discount_percent', '10', 'Persentase diskon reservasi kamar via aplikasi HCH (%)')
+VALUES 
+  ('hch_member_discount_percent', '10', 'Persentase diskon reservasi kamar via aplikasi HCH (%)'),
+  ('payment_bank_name', 'Bank BCA', 'Nama Bank Rekening Resmi Pembayaran Cashless'),
+  ('payment_bank_account', '123-456-7890', 'Nomor Rekening Pembayaran Cashless'),
+  ('payment_account_name', 'Hotel Celebes Hasanuddin', 'Atas Nama Rekening Pembayaran Cashless')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 -- ----------------------------------------------------------
@@ -50,19 +54,22 @@ ALTER TABLE user_missions
   MODIFY COLUMN status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending';
 
 ALTER TABLE user_missions 
-  ADD COLUMN IF NOT EXISTS proof_note VARCHAR(255) NULL AFTER status;
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
 ALTER TABLE user_missions 
-  ADD COLUMN IF NOT EXISTS proof_file VARCHAR(255) NULL AFTER proof_note;
+  ADD COLUMN IF NOT EXISTS proof_note VARCHAR(255) NULL;
 
 ALTER TABLE user_missions 
-  ADD COLUMN IF NOT EXISTS room_number VARCHAR(50) NULL AFTER proof_file;
+  ADD COLUMN IF NOT EXISTS proof_file VARCHAR(255) NULL;
 
 ALTER TABLE user_missions 
-  ADD COLUMN IF NOT EXISTS admin_note VARCHAR(255) NULL AFTER room_number;
+  ADD COLUMN IF NOT EXISTS room_number VARCHAR(50) NULL;
 
 ALTER TABLE user_missions 
-  ADD COLUMN IF NOT EXISTS awarded_at DATETIME NULL AFTER created_at;
+  ADD COLUMN IF NOT EXISTS admin_note VARCHAR(255) NULL;
+
+ALTER TABLE user_missions 
+  ADD COLUMN IF NOT EXISTS awarded_at DATETIME NULL;
 
 -- ----------------------------------------------------------
 -- 5. Tabel Reservations: Kolom Diskon & Sumber Reservasi
