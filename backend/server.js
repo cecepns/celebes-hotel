@@ -165,12 +165,23 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-const verifyAdmin = (req, res, next) => {
+const verifyStaffOrAdmin = (req, res, next) => {
   verifyToken(req, res, () => {
-    if (req.user && (req.user.role === 'admin' || req.user.role === 'staff' || req.user.role === 'kasir')) {
+    if (req.user && ['admin', 'supervisor', 'resepsionis', 'kasir', 'staff'].includes(req.user.role)) {
       next();
     } else {
-      return res.status(403).json({ success: false, message: 'Akses khusus Staf / Kasir / Administrator' });
+      return res.status(403).json({ success: false, message: 'Akses khusus Staf / Resepsionis / Supervisor / Admin' });
+    }
+  });
+};
+const verifyAdmin = verifyStaffOrAdmin; // alias for general staff/admin access
+
+const verifySupervisorOrAdmin = (req, res, next) => {
+  verifyToken(req, res, () => {
+    if (req.user && ['admin', 'supervisor'].includes(req.user.role)) {
+      next();
+    } else {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Fitur ini khusus Supervisor atau Administrator.' });
     }
   });
 };
@@ -202,7 +213,7 @@ app.get('/api/settings/public', async (req, res) => {
 // Register
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, phone, email, password } = req.body;
+    const { name, phone, email, password, birth_date } = req.body;
     if (!name || !phone || !password) {
       return res.status(400).json({ success: false, message: 'Nama, No WhatsApp/HP, dan password wajib diisi' });
     }
@@ -219,13 +230,13 @@ app.post('/api/auth/register', async (req, res) => {
     const memberCode = await generateMemberCode();
 
     const [insertResult] = await pool.query(
-      'INSERT INTO users (name, phone, email, password, role, member_code, total_points) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [name.trim(), cleanPhone, email ? email.trim() : null, hashedPassword, 'member', memberCode, 0]
+      'INSERT INTO users (name, phone, email, birth_date, password, role, member_code, total_points) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [name.trim(), cleanPhone, email ? email.trim() : null, birth_date || null, hashedPassword, 'member', memberCode, 0]
     );
 
     const userId = insertResult.insertId;
 
-    // Check welcome mission / bonus if applicable
+    // Generate token
     const token = jwt.sign(
       { id: userId, phone: cleanPhone, name: name.trim(), role: 'member', member_code: memberCode },
       JWT_SECRET,
@@ -237,7 +248,7 @@ app.post('/api/auth/register', async (req, res) => {
       message: 'Registrasi berhasil! Selamat bergabung di Royalti Reward HCH',
       data: {
         token,
-        user: { id: userId, name: name.trim(), phone: cleanPhone, email, role: 'member', member_code: memberCode, total_points: 0 }
+        user: { id: userId, name: name.trim(), phone: cleanPhone, email, birth_date: birth_date || null, role: 'member', member_code: memberCode, total_points: 0 }
       }
     });
   } catch (err) {
@@ -286,7 +297,7 @@ app.post('/api/auth/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       // Support default admin / demo fallback if needed
-      if (password === 'admin123' && user.role === 'admin') {
+      if (password === 'admin123' && ['admin', 'supervisor', 'resepsionis', 'kasir', 'staff'].includes(user.role)) {
         // match
       } else if (password === '123456' && (user.role === 'member' || user.role === 'kasir')) {
         // match
@@ -314,6 +325,7 @@ app.post('/api/auth/login', async (req, res) => {
           name: user.name,
           phone: user.phone,
           email: user.email,
+          birth_date: user.birth_date,
           role: user.role,
           member_code: user.member_code,
           total_points: currentPoints
@@ -328,7 +340,7 @@ app.post('/api/auth/login', async (req, res) => {
 // Profile
 app.get('/api/auth/profile', verifyToken, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT id, name, phone, email, role, member_code, avatar, created_at FROM users WHERE id = ?', [req.user.id]);
+    const [rows] = await pool.query('SELECT id, name, phone, email, birth_date, role, member_code, avatar, created_at FROM users WHERE id = ?', [req.user.id]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
     }
@@ -360,8 +372,8 @@ app.get('/api/auth/profile', verifyToken, async (req, res) => {
 // Update Profile
 app.put('/api/auth/profile', verifyToken, async (req, res) => {
   try {
-    const { name, email } = req.body;
-    await pool.query('UPDATE users SET name = ?, email = ? WHERE id = ?', [name.trim(), email ? email.trim() : null, req.user.id]);
+    const { name, email, birth_date } = req.body;
+    await pool.query('UPDATE users SET name = ?, email = ?, birth_date = ? WHERE id = ?', [name.trim(), email ? email.trim() : null, birth_date || null, req.user.id]);
     res.json({ success: true, message: 'Profil berhasil diperbarui' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -641,11 +653,13 @@ app.get('/api/member/missions', verifyToken, async (req, res) => {
       }
 
       const completion = completedMap[`${m.id}_${periodKey}`];
+      const isApproved = !!completion && completion.status === 'approved';
       return {
         ...m,
         period_key: periodKey,
-        is_completed: !!completion,
+        is_completed: isApproved,
         completion_status: completion ? completion.status : 'not_started',
+        claim_status: completion ? completion.status : null,
         completed_at: completion ? completion.awarded_at : null
       };
     });
@@ -656,14 +670,14 @@ app.get('/api/member/missions', verifyToken, async (req, res) => {
   }
 });
 
-// Member Claim / Complete Mission
+// Member Claim / Complete Mission (Submits claim with status 'pending' for admin approval)
 app.post('/api/member/missions/:id/claim', verifyToken, upload.single('proof_file'), async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     const userId = req.user.id;
     const missionId = req.params.id;
-    const { proof_note } = req.body;
+    const { proof_note, room_number } = req.body;
 
     const [missions] = await connection.query('SELECT * FROM missions WHERE id = ? AND is_active = 1', [missionId]);
     if (missions.length === 0) {
@@ -680,42 +694,53 @@ app.post('/api/member/missions/:id/claim', verifyToken, upload.single('proof_fil
       periodKey = 'SEASON_' + new Date().getFullYear();
     }
 
-    // Check if already claimed
+    // Check if already claimed / pending in this period
     const [existing] = await connection.query(
-      'SELECT id FROM user_missions WHERE user_id = ? AND mission_id = ? AND period_key = ?',
+      'SELECT id, status FROM user_missions WHERE user_id = ? AND mission_id = ? AND period_key = ?',
       [userId, mission.id, periodKey]
     );
 
     if (existing.length > 0) {
       await connection.rollback();
-      return res.status(400).json({ success: false, message: 'Anda sudah menyelesaikan misi ini pada periode ini.' });
+      const statusText = existing[0].status === 'pending' ? 'sedang menunggu persetujuan admin' : 'sudah disetujui sebelumnya';
+      return res.status(400).json({ success: false, message: `Klaim misi ini ${statusText}.` });
+    }
+
+    // Validate stay period: "klaim mission tidak berlaku apabila telah lewat masa menginap"
+    const [resRows] = await connection.query(
+      'SELECT check_in, check_out, status FROM reservations WHERE user_id = ? ORDER BY check_out DESC LIMIT 1',
+      [userId]
+    );
+    if (resRows.length > 0) {
+      const checkOutDate = new Date(resRows[0].check_out);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      checkOutDate.setHours(23, 59, 59, 999);
+      if (today > checkOutDate) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Klaim misi tidak berlaku apabila telah lewat masa menginap (Check-out: ${resRows[0].check_out}).`
+        });
+      }
     }
 
     const proofFile = req.file ? `/uploads/${req.file.filename}` : null;
+    const defaultNote = `Saya atas nama ${req.user.name} yg hari ini tanggal ${new Date().toLocaleDateString('id-ID')} telah cek in d No.kamar ${room_number || '-'} .`;
+    const finalNote = proof_note ? proof_note.trim() : defaultNote;
 
-    // Record user mission
+    // Record user mission with status 'pending'
     await connection.query(
-      'INSERT INTO user_missions (user_id, mission_id, period_key, status, proof_note, proof_file, awarded_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-      [userId, mission.id, periodKey, 'approved', proof_note || 'Klaim Mandiri / Otomatis', proofFile]
+      'INSERT INTO user_missions (user_id, mission_id, period_key, status, proof_note, room_number, proof_file, created_at) VALUES (?, ?, ?, "pending", ?, ?, ?, NOW())',
+      [userId, mission.id, periodKey, finalNote, room_number || null, proofFile]
     );
-
-    // Award Points FIFO Ledger (365 days)
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 365);
-
-    await connection.query(
-      'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, ?, NOW(), ?, 0, "mission", ?)',
-      [userId, mission.bonus_points, mission.bonus_points, expiryDate, `Misi Selesai: ${mission.title}`]
-    );
-
-    // Update total points
-    await connection.query('UPDATE users SET total_points = total_points + ? WHERE id = ?', [mission.bonus_points, userId]);
 
     await connection.commit();
 
     res.json({
       success: true,
-      message: `Selamat! Misi "${mission.title}" selesai. Anda mendapatkan +${mission.bonus_points} poin.`,
+      message: `Klaim misi "${mission.title}" berhasil diajukan! Menunggu persetujuan (approval) pihak resepsionis / admin hotel.`,
+      status: 'pending',
       bonus_points: mission.bonus_points
     });
   } catch (err) {
@@ -765,6 +790,16 @@ app.get('/api/rooms', async (req, res) => {
   }
 });
 
+// Public Closed Dates (Active blackout dates)
+app.get('/api/closed-dates/public', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM closed_dates WHERE is_closed = 1 AND end_date >= CURDATE() ORDER BY start_date ASC');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Member Create Reservation
 app.post('/api/member/reservations', async (req, res) => {
   try {
@@ -784,23 +819,61 @@ app.post('/api/member/reservations', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Nama, telepon, tipe kamar, dan tanggal check-in/out wajib diisi' });
     }
 
-    const [result] = await pool.query(
-      'INSERT INTO reservations (user_id, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "inquiry")',
-      [userId, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, notes || null]
+    // Check closed dates (Blackout dates e.g. Malam Tahun Baru)
+    const [closedMatches] = await pool.query(
+      `SELECT reason, start_date, end_date FROM closed_dates 
+       WHERE is_closed = 1 
+       AND NOT (? >= end_date OR ? <= start_date)`,
+      [check_in, check_out]
     );
 
+    if (closedMatches.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Reservasi tanggal tersebut saat ini ditutup (${closedMatches[0].reason}). Silakan pilih tanggal lain atau hubungi pihak hotel.`
+      });
+    }
+
+    // Calculate nights & discount HCH
+    const [roomRows] = await pool.query('SELECT price FROM rooms WHERE name = ?', [room_type]);
+    const roomPrice = roomRows.length > 0 ? parseFloat(roomRows[0].price) : 350000;
+    const d1 = new Date(check_in);
+    const d2 = new Date(check_out);
+    const nights = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
+    const baseTotal = roomPrice * nights * parseInt(num_rooms);
+
     const settings = await getSettingsMap();
+    const discountPercent = parseFloat(settings.hch_member_discount_percent) || 10;
+    const discountAmount = Math.round(baseTotal * (discountPercent / 100));
+    const finalTotal = Math.max(0, baseTotal - discountAmount);
+
+    const [result] = await pool.query(
+      'INSERT INTO reservations (user_id, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, discount_percent, discount_amount, total_price, source, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "app_hch", ?, "inquiry")',
+      [userId, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, discountPercent, discountAmount, finalTotal, notes || null]
+    );
+
     const waNumber = settings.whatsapp_number || '6282189001285';
     const waText = encodeURIComponent(
-      `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin reservasi kamar:\n- Nama: ${guest_name}\n- Tipe Kamar: ${room_type}\n- Check-In: ${check_in}\n- Check-Out: ${check_out}\n- Jumlah Kamar: ${num_rooms}\n- Jumlah Tamu: ${num_guests}\n${notes ? `- Catatan: ${notes}\n` : ''}Mohon konfirmasi ketersediaan kamar. Terima kasih!`
+      `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin konfirmasi reservasi kamar via Aplikasi HCH (Diskon Member ${discountPercent}%):\n` +
+      `- Nama Tamu: ${guest_name}\n` +
+      `- No. HP: ${guest_phone}\n` +
+      `- Tipe Kamar: ${room_type} (${num_rooms} Kamar, ${nights} Malam)\n` +
+      `- Check-In: ${check_in}\n` +
+      `- Check-Out: ${check_out}\n` +
+      `- Estimasi Total: Rp ${Number(finalTotal).toLocaleString('id-ID')} (Hemat Diskon Rp ${Number(discountAmount).toLocaleString('id-ID')})\n` +
+      `${notes ? `- Catatan: ${notes}\n` : ''}` +
+      `Mohon informasi nomor rekening / QRIS untuk pelunasan (cashless) sebelum check-in. Terima kasih!`
     );
     const waUrl = `https://wa.me/${waNumber}?text=${waText}`;
 
     res.json({
       success: true,
-      message: 'Reservasi berhasil dicatat!',
+      message: 'Reservasi berhasil dicatat! Tim resepsionis akan segera mengonfirmasi ketersediaan kamar.',
       data: {
         id: result.insertId,
+        discount_percent: discountPercent,
+        discount_amount: discountAmount,
+        total_price: finalTotal,
         whatsapp_url: waUrl
       }
     });
@@ -1115,9 +1188,9 @@ app.post('/api/admin/users', verifySuperAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Nama, nomor HP, password, dan role wajib diisi' });
     }
 
-    const validRoles = ['admin', 'kasir', 'staff'];
+    const validRoles = ['admin', 'supervisor', 'resepsionis', 'kasir', 'staff'];
     if (!validRoles.includes(role)) {
-      return res.status(400).json({ success: false, message: 'Role tidak valid (Pilih: admin atau kasir)' });
+      return res.status(400).json({ success: false, message: 'Role tidak valid (Pilih: admin, supervisor, atau resepsionis)' });
     }
 
     const cleanPhone = phone.trim().replace(/^0/, '62').replace(/[^\d]/g, '');
@@ -1138,7 +1211,11 @@ app.post('/api/admin/users', verifySuperAdmin, async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const prefix = role === 'admin' ? 'ADM' : 'KAS';
+    let prefix = 'STF';
+    if (role === 'admin') prefix = 'ADM';
+    else if (role === 'supervisor') prefix = 'SPV';
+    else if (role === 'resepsionis' || role === 'kasir') prefix = 'RCP';
+
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const code = `HCH-${prefix}-${randomNum}`;
 
@@ -1164,7 +1241,7 @@ app.post('/api/admin/users', verifySuperAdmin, async (req, res) => {
   }
 });
 
-// Update User (Admin / Kasir)
+// Update User (Admin / Kasir / Supervisor / Resepsionis)
 app.put('/api/admin/users/:id', verifySuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1176,7 +1253,7 @@ app.put('/api/admin/users/:id', verifySuperAdmin, async (req, res) => {
     }
 
     const currentUser = existing[0];
-    const validRoles = ['admin', 'kasir', 'staff'];
+    const validRoles = ['admin', 'supervisor', 'resepsionis', 'kasir', 'staff'];
     const targetRole = role || currentUser.role;
 
     if (!validRoles.includes(targetRole)) {
@@ -1404,6 +1481,172 @@ app.post('/api/admin/transactions', verifyAdmin, async (req, res) => {
   }
 });
 
+// Admin Update Transaction (Edit Transaksi)
+// Hak akses: Receptionist [X], Supervisor [Terbatas], Admin [Full]
+app.put('/api/admin/transactions/:id', verifyAdmin, async (req, res) => {
+  try {
+    const userRole = req.user.role;
+    if (['resepsionis', 'kasir', 'staff'].includes(userRole)) {
+      return res.status(403).json({ success: false, message: 'Akses ditolak: Resepsionis tidak memiliki izin untuk mengedit transaksi.' });
+    }
+
+    const { id } = req.params;
+    const { category, invoice_no, notes, transaction_date, amount } = req.body;
+
+    const [existing] = await pool.query('SELECT * FROM transactions WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
+    }
+
+    const currentTrans = existing[0];
+
+    // Supervisor: Terbatas (bisa edit catatan, nomor invoice, kategori, tanggal, tetapi tidak bisa sembarang ubah nominal / poin)
+    if (userRole === 'supervisor') {
+      await pool.query(
+        'UPDATE transactions SET category = ?, invoice_no = ?, notes = ?, transaction_date = ? WHERE id = ?',
+        [category || currentTrans.category, invoice_no ? invoice_no.trim() : currentTrans.invoice_no, notes || currentTrans.notes, transaction_date || currentTrans.transaction_date, id]
+      );
+      return res.json({ success: true, message: 'Data transaksi berhasil diperbarui oleh Supervisor (Edit Terbatas)' });
+    }
+
+    // Admin: Full Edit
+    if (amount && parseFloat(amount) !== parseFloat(currentTrans.amount)) {
+      const numAmount = parseFloat(amount);
+      const settings = await getSettingsMap();
+      const unitAmount = parseFloat(settings.spending_unit_amount) || 50000;
+      const pointsPerUnit = parseInt(settings.points_per_unit) || 5;
+      const newEarned = Math.floor(numAmount / unitAmount) * pointsPerUnit;
+      const pointDiff = newEarned - currentTrans.points_earned;
+
+      await pool.query(
+        'UPDATE transactions SET category = ?, invoice_no = ?, amount = ?, points_earned = ?, notes = ?, transaction_date = ? WHERE id = ?',
+        [category || currentTrans.category, invoice_no ? invoice_no.trim() : currentTrans.invoice_no, numAmount, newEarned, notes || currentTrans.notes, transaction_date || currentTrans.transaction_date, id]
+      );
+
+      // Adjust point ledger & user points
+      if (pointDiff !== 0) {
+        if (pointDiff > 0) {
+          const expiryDate = new Date();
+          expiryDate.setDate(expiryDate.getDate() + 365);
+          await pool.query(
+            'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, ?, ?, ?, NOW(), ?, 0, "adjustment", ?)',
+            [currentTrans.user_id, id, pointDiff, pointDiff, expiryDate, `Penyesuaian Transaksi #${id}`]
+          );
+        } else {
+          // deduct points difference
+          await deductPointsFIFO(currentTrans.user_id, Math.abs(pointDiff));
+        }
+        await syncUserPointsFIFO(currentTrans.user_id);
+      }
+    } else {
+      await pool.query(
+        'UPDATE transactions SET category = ?, invoice_no = ?, notes = ?, transaction_date = ? WHERE id = ?',
+        [category || currentTrans.category, invoice_no ? invoice_no.trim() : currentTrans.invoice_no, notes || currentTrans.notes, transaction_date || currentTrans.transaction_date, id]
+      );
+    }
+
+    res.json({ success: true, message: 'Data transaksi berhasil diperbarui oleh Admin' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin Delete / Cancel Transaction (Batalkan / Reversal Poin)
+// Hak akses: Receptionist [X], Supervisor [V], Admin [V]
+app.delete('/api/admin/transactions/:id', verifySupervisorOrAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+
+    const [transRows] = await connection.query('SELECT * FROM transactions WHERE id = ?', [id]);
+    if (transRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
+    }
+
+    const trans = transRows[0];
+    const pointsToReverse = trans.points_earned;
+
+    // Deduct points from member if points were earned
+    if (pointsToReverse > 0) {
+      await connection.query(
+        'DELETE FROM point_ledger WHERE transaction_id = ? AND user_id = ?',
+        [id, trans.user_id]
+      );
+      // Recalculate remaining active points
+      const [sumRes] = await connection.query(
+        'SELECT COALESCE(SUM(points_remaining), 0) AS total FROM point_ledger WHERE user_id = ? AND is_expired = 0',
+        [trans.user_id]
+      );
+      const newTotal = parseInt(sumRes[0].total) || 0;
+      await connection.query('UPDATE users SET total_points = ? WHERE id = ?', [newTotal, trans.user_id]);
+    }
+
+    // Delete transaction
+    await connection.query('DELETE FROM transactions WHERE id = ?', [id]);
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: `Transaksi #${trans.invoice_no} berhasil dibatalkan dan -${pointsToReverse} poin telah di-reversal.`
+    });
+  } catch (err) {
+    await connection.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// Bonus Poin Manual (Adjustment)
+// Hak akses: Receptionist [X], Supervisor [Terbatas: Max 50 pts], Admin [V: Unlimited]
+app.post('/api/admin/transactions/manual-bonus', verifySupervisorOrAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { user_id, points, description } = req.body;
+    const numPoints = parseInt(points);
+
+    if (!user_id || !numPoints || numPoints <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: 'Member dan jumlah poin bonus (> 0) wajib diisi' });
+    }
+
+    // Supervisor limit check
+    if (req.user.role === 'supervisor' && numPoints > 50) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Akses terbatas: Supervisor hanya dapat memberikan maksimal 50 bonus poin manual per penyesuaian.'
+      });
+    }
+
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 365);
+
+    const desc = description ? description.trim() : `Bonus Poin Manual oleh ${req.user.name} (${req.user.role.toUpperCase()})`;
+
+    await connection.query(
+      'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, ?, NOW(), ?, 0, "bonus", ?)',
+      [user_id, numPoints, numPoints, expiryDate, desc]
+    );
+
+    await connection.query('UPDATE users SET total_points = total_points + ? WHERE id = ?', [numPoints, user_id]);
+    await connection.commit();
+
+    res.status(201).json({
+      success: true,
+      message: `Berhasil menambahkan +${numPoints} bonus poin manual ke akun member!`
+    });
+  } catch (err) {
+    await connection.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 // Admin Rewards Management (CRUD)
 app.get('/api/admin/rewards', verifyAdmin, async (req, res) => {
   try {
@@ -1436,7 +1679,7 @@ app.get('/api/admin/rewards', verifyAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/rewards', verifyAdmin, upload.single('image'), async (req, res) => {
+app.post('/api/admin/rewards', verifySuperAdmin, upload.single('image'), async (req, res) => {
   try {
     const { title, category = 'other', points_required, terms, stock = -1, is_active = 1 } = req.body;
     if (!title || !points_required) {
@@ -1456,7 +1699,7 @@ app.post('/api/admin/rewards', verifyAdmin, upload.single('image'), async (req, 
   }
 });
 
-app.put('/api/admin/rewards/:id', verifyAdmin, upload.single('image'), async (req, res) => {
+app.put('/api/admin/rewards/:id', verifySuperAdmin, upload.single('image'), async (req, res) => {
   try {
     const { title, category, points_required, terms, stock, is_active } = req.body;
     let query = 'UPDATE rewards SET title = ?, category = ?, points_required = ?, terms = ?, stock = ?, is_active = ?';
@@ -1477,7 +1720,7 @@ app.put('/api/admin/rewards/:id', verifyAdmin, upload.single('image'), async (re
   }
 });
 
-app.delete('/api/admin/rewards/:id', verifyAdmin, async (req, res) => {
+app.delete('/api/admin/rewards/:id', verifySuperAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM rewards WHERE id = ?', [req.params.id]);
     res.json({ success: true, message: 'Reward berhasil dihapus' });
@@ -1518,7 +1761,7 @@ app.get('/api/admin/missions', verifyAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/missions', verifyAdmin, async (req, res) => {
+app.post('/api/admin/missions', verifySuperAdmin, async (req, res) => {
   try {
     const { title, type, requirement, bonus_points, recurrence = 'Sekali', icon = 'star', is_active = 1 } = req.body;
     if (!title || !type || !bonus_points) {
@@ -1536,7 +1779,7 @@ app.post('/api/admin/missions', verifyAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/missions/:id', verifyAdmin, async (req, res) => {
+app.put('/api/admin/missions/:id', verifySuperAdmin, async (req, res) => {
   try {
     const { title, type, requirement, bonus_points, recurrence, icon, is_active } = req.body;
     await pool.query(
@@ -1549,10 +1792,143 @@ app.put('/api/admin/missions/:id', verifyAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/admin/missions/:id', verifyAdmin, async (req, res) => {
+app.delete('/api/admin/missions/:id', verifySuperAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM missions WHERE id = ?', [req.params.id]);
     res.json({ success: true, message: 'Misi berhasil dihapus' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin Mission Claims Approval Endpoints (Admin & Supervisor)
+app.get('/api/admin/mission-claims', verifyAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', status = '' } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+
+    if (status && status !== 'all') {
+      whereClause += ' AND um.status = ?';
+      params.push(status);
+    }
+    if (search.trim()) {
+      whereClause += ' AND (u.name LIKE ? OR u.phone LIKE ? OR u.member_code LIKE ? OR m.title LIKE ? OR um.room_number LIKE ?)';
+      const s = `%${search.trim()}%`;
+      params.push(s, s, s, s, s);
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) as total 
+       FROM user_missions um
+       JOIN users u ON um.user_id = u.id
+       JOIN missions m ON um.mission_id = m.id
+       ${whereClause}`,
+      params
+    );
+    const total = countRows[0].total;
+
+    const [rows] = await pool.query(
+      `SELECT um.*, um.proof_note as claim_note, u.name as member_name, u.phone as member_phone, u.member_code,
+              m.title as mission_title, m.bonus_points, m.type as mission_type
+       FROM user_missions um
+       JOIN users u ON um.user_id = u.id
+       JOIN missions m ON um.mission_id = m.id
+       ${whereClause}
+       ORDER BY CASE WHEN um.status = 'pending' THEN 0 ELSE 1 END, um.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), parseInt(offset)]
+    );
+
+    res.json(formatPaginatedResponse(rows, page, limit, total));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Approve Mission Claim
+app.post('/api/admin/mission-claims/:id/approve', verifySupervisorOrAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+
+    const [claimRows] = await connection.query(
+      `SELECT um.*, m.title as mission_title, m.bonus_points, u.name as member_name
+       FROM user_missions um
+       JOIN missions m ON um.mission_id = m.id
+       JOIN users u ON um.user_id = u.id
+       WHERE um.id = ?`,
+      [id]
+    );
+
+    if (claimRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Data klaim misi tidak ditemukan' });
+    }
+
+    const claim = claimRows[0];
+    if (claim.status === 'approved') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: 'Klaim misi ini sudah pernah disetujui sebelumnya' });
+    }
+
+    // Update user_missions status
+    await connection.query(
+      'UPDATE user_missions SET status = "approved", awarded_at = NOW(), admin_note = ? WHERE id = ?',
+      [`Disetujui oleh ${req.user.name} (${req.user.role.toUpperCase()})`, id]
+    );
+
+    // Award Points FIFO Ledger (365 days)
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 365);
+
+    await connection.query(
+      'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, ?, NOW(), ?, 0, "mission", ?)',
+      [claim.user_id, claim.bonus_points, claim.bonus_points, expiryDate, `Misi Selesai: ${claim.mission_title}`]
+    );
+
+    // Update total points
+    await connection.query('UPDATE users SET total_points = total_points + ? WHERE id = ?', [claim.bonus_points, claim.user_id]);
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: `Klaim misi "${claim.mission_title}" untuk tamu ${claim.member_name} berhasil disetujui! +${claim.bonus_points} poin telah ditambahkan.`
+    });
+  } catch (err) {
+    await connection.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// Reject Mission Claim
+app.post('/api/admin/mission-claims/:id/reject', verifySupervisorOrAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const [claimRows] = await pool.query('SELECT * FROM user_missions WHERE id = ?', [id]);
+    if (claimRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Data klaim misi tidak ditemukan' });
+    }
+
+    const claim = claimRows[0];
+    if (claim.status === 'approved') {
+      return res.status(400).json({ success: false, message: 'Klaim yang sudah disetujui tidak dapat ditolak langsung. Harap batalkan lewat penyesuaian poin.' });
+    }
+
+    await pool.query(
+      'UPDATE user_missions SET status = "rejected", admin_note = ? WHERE id = ?',
+      [reason || `Ditolak oleh ${req.user.name} (${req.user.role.toUpperCase()})`, id]
+    );
+
+    res.json({ success: true, message: 'Klaim misi telah ditolak' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -1716,6 +2092,52 @@ app.put('/api/admin/reservations/:id', verifyAdmin, async (req, res) => {
     const { status } = req.body;
     await pool.query('UPDATE reservations SET status = ? WHERE id = ?', [status, req.params.id]);
     res.json({ success: true, message: 'Status reservasi berhasil diperbarui' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ==========================================
+// Admin Closed Dates (Buka / Tutup Tanggal Reservasi)
+// ==========================================
+app.get('/api/admin/closed-dates', verifyAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM closed_dates ORDER BY start_date DESC');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/admin/closed-dates', verifySuperAdmin, async (req, res) => {
+  try {
+    const { start_date, end_date, reason, is_closed = 1 } = req.body;
+    if (!start_date || !end_date || !reason) {
+      return res.status(400).json({ success: false, message: 'Tanggal mulai, tanggal selesai, dan alasan penutupan wajib diisi' });
+    }
+    const [result] = await pool.query(
+      'INSERT INTO closed_dates (start_date, end_date, reason, is_closed) VALUES (?, ?, ?, ?)',
+      [start_date, end_date, reason.trim(), is_closed ? 1 : 0]
+    );
+    res.status(201).json({ success: true, message: 'Tanggal penutupan reservasi berhasil disimpan', data: { id: result.insertId } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/admin/closed-dates/:id/toggle', verifySuperAdmin, async (req, res) => {
+  try {
+    await pool.query('UPDATE closed_dates SET is_closed = 1 - is_closed WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Status buka/tutup tanggal reservasi berhasil diubah' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/admin/closed-dates/:id', verifySuperAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM closed_dates WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Data tanggal penutupan reservasi berhasil dihapus' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

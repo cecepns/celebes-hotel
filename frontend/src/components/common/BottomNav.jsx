@@ -1,9 +1,12 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Headset, User, Ticket } from 'lucide-react';
+import { Home, Headset, User, Ticket, ShieldCheck } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 export const BottomNav = () => {
   const location = useLocation();
+  const { user } = useAuth();
+  const isStaff = ['admin', 'supervisor', 'resepsionis', 'staff', 'kasir'].includes(user?.role);
 
   const navItems = [
     {
@@ -14,12 +17,12 @@ export const BottomNav = () => {
     },
     {
       to: '/my-vouchers',
-      label: 'Voucher Saya',
+      label: 'Voucher',
       icon: Ticket,
     },
     {
       to: '/contact-us',
-      label: 'Contact Us',
+      label: 'Bantuan',
       icon: Headset,
     },
     {
@@ -29,9 +32,18 @@ export const BottomNav = () => {
     },
   ];
 
+  if (isStaff) {
+    navItems.push({
+      to: '/admin',
+      label: 'Panel Admin',
+      icon: ShieldCheck,
+      isSpecial: true,
+    });
+  }
+
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 max-w-[440px] mx-auto transition-all">
-      <div className="grid grid-cols-4 h-16">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 max-w-[440px] mx-auto transition-all shadow-lg">
+      <div className={`grid ${isStaff ? 'grid-cols-5' : 'grid-cols-4'} h-16`}>
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.exact

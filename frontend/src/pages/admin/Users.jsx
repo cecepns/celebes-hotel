@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Shield,
+  ShieldCheck,
   Store,
   Trash2,
   Edit2,
@@ -22,6 +23,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -46,6 +49,7 @@ export const AdminUsers = () => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -53,7 +57,7 @@ export const AdminUsers = () => {
     phone: '',
     email: '',
     password: '',
-    role: 'kasir',
+    role: 'resepsionis',
   });
 
   // Debounce search timer
@@ -108,12 +112,13 @@ export const AdminUsers = () => {
 
   // Open Create Modal
   const handleOpenCreate = () => {
+    setShowPassword(false);
     setFormData({
       name: '',
       phone: '',
       email: '',
       password: '',
-      role: 'kasir',
+      role: 'resepsionis',
     });
     setCreateModalOpen(true);
   };
@@ -129,7 +134,7 @@ export const AdminUsers = () => {
     try {
       const res = await api.post(API_ENDPOINTS.ADMIN.USERS.CREATE, formData);
       if (res.data?.success) {
-        toast.success(res.data.message || 'User berhasil ditambahkan');
+        toast.success(res.data.message || 'User staf berhasil ditambahkan');
         setCreateModalOpen(false);
         fetchUsers(1, pagination.limit);
       }
@@ -143,6 +148,7 @@ export const AdminUsers = () => {
   // Open Edit Modal
   const handleOpenEdit = (u) => {
     setSelectedUser(u);
+    setShowPassword(false);
     setFormData({
       name: u.name,
       phone: u.phone,
@@ -207,11 +213,13 @@ export const AdminUsers = () => {
   const roleFilterOptions = [
     { value: 'all', label: 'Semua Role' },
     { value: 'admin', label: 'Administrator' },
-    { value: 'kasir', label: 'Kasir' },
+    { value: 'supervisor', label: 'Supervisor' },
+    { value: 'resepsionis', label: 'Resepsionis / Kasir' },
   ];
 
   const roleFormOptions = [
-    { value: 'kasir', label: 'Kasir (Input Transaksi & Validasi)' },
+    { value: 'resepsionis', label: 'Resepsionis / Kasir (Input Transaksi & Member)' },
+    { value: 'supervisor', label: 'Supervisor (Approval Misi, Reversal & Laporan)' },
     { value: 'admin', label: 'Administrator (Akses Penuh Sistem)' },
   ];
 
@@ -222,10 +230,10 @@ export const AdminUsers = () => {
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
             <UserCog className="w-6 h-6 text-red-600" />
-            Manajemen User
+            Manajemen User & Hak Akses
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Kelola hak akses akun staf, kasir, dan administrator Hotel Celebes
+            Kelola 4 level role: Administrator, Supervisor, Resepsionis/Kasir, dan Member
           </p>
         </div>
 
@@ -249,12 +257,12 @@ export const AdminUsers = () => {
             value={search}
             onChange={handleSearchChange}
             placeholder="Cari nama, HP, email, kode..."
-            className="w-full text-xs pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
+            className="w-full text-xs pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition font-medium"
           />
         </div>
 
-        {/* Role Filter using React-Select */}
-        <div className="w-full md:w-56 flex items-center gap-2">
+        {/* Role Filter */}
+        <div className="w-full md:w-64 flex items-center gap-2">
           <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Filter:</span>
           <Select
             className="flex-1"
@@ -303,6 +311,8 @@ export const AdminUsers = () => {
                 users.map((u) => {
                   const isSelf = u.id === currentUser?.id;
                   const isAdmin = u.role === 'admin';
+                  const isSpv = u.role === 'supervisor';
+                  const isReception = ['resepsionis', 'kasir', 'staff'].includes(u.role);
 
                   return (
                     <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
@@ -330,10 +340,18 @@ export const AdminUsers = () => {
                           className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
                             isAdmin
                               ? 'bg-red-100 text-red-700'
+                              : isSpv
+                              ? 'bg-purple-100 text-purple-700'
                               : 'bg-blue-100 text-blue-700'
                           }`}
                         >
-                          {isAdmin ? <Shield className="w-3 h-3" /> : <Store className="w-3 h-3" />}
+                          {isAdmin ? (
+                            <Shield className="w-3 h-3" />
+                          ) : isSpv ? (
+                            <ShieldCheck className="w-3 h-3" />
+                          ) : (
+                            <Store className="w-3 h-3" />
+                          )}
                           {u.role}
                         </span>
                       </td>
@@ -384,7 +402,7 @@ export const AdminUsers = () => {
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         title="Tambah User Baru"
-        subtitle="Buat akun staf kasir atau administrator baru"
+        subtitle="Buat akun staf, resepsionis, supervisor, atau administrator baru"
       >
         <form onSubmit={handleCreateSubmit} className="space-y-3.5">
           <div>
@@ -408,8 +426,8 @@ export const AdminUsers = () => {
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Contoh: Budi Santoso"
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                placeholder="Contoh: Andi Pratama"
+                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
             </div>
           </div>
@@ -426,7 +444,7 @@ export const AdminUsers = () => {
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 placeholder="Contoh: 08123456789"
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
             </div>
           </div>
@@ -440,7 +458,7 @@ export const AdminUsers = () => {
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder="user@celebeshotel.com"
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
             </div>
           </div>
@@ -450,13 +468,20 @@ export const AdminUsers = () => {
             <div className="relative">
               <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
-                type="text"
+                type={showPassword ? 'text' : 'password'}
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="Buat password login user"
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-10 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
@@ -508,7 +533,7 @@ export const AdminUsers = () => {
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
             </div>
           </div>
@@ -524,7 +549,7 @@ export const AdminUsers = () => {
                 required
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
             </div>
           </div>
@@ -537,7 +562,7 @@ export const AdminUsers = () => {
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
             </div>
           </div>
@@ -549,12 +574,19 @@ export const AdminUsers = () => {
             <div className="relative">
               <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
-                type="text"
+                type={showPassword ? 'text' : 'password'}
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                placeholder="Masukkan password baru"
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                placeholder="Masukkan password baru jika ingin mengubah"
+                className="w-full text-xs pl-9 pr-10 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 

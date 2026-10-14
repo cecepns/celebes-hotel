@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { request } from '@/utils/request';
 import { API_ENDPOINTS } from '@/utils/endpoints';
+import { useAuth } from '@/context/AuthContext';
 import {
   CalendarDays,
   Search,
@@ -11,7 +12,17 @@ import {
   Bed,
   Users,
   Calendar,
+  CalendarX,
+  Plus,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  Sparkles,
+  Percent,
+  CreditCard,
+  AlertCircle,
 } from 'lucide-react';
+import { Modal } from '@/components/common/Modal';
 import { Pagination } from '@/components/common/Pagination';
 import { TableSkeleton } from '@/components/common/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -19,6 +30,7 @@ import { Select } from '@/components/common/Select';
 import toast from 'react-hot-toast';
 
 export const AdminReservations = () => {
+  const { isSuperAdmin } = useAuth();
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -30,6 +42,17 @@ export const AdminReservations = () => {
     total: 0,
     totalPages: 1,
   });
+
+  // Blackout / Closed Dates State & Modal
+  const [closedDatesModalOpen, setClosedDatesModalOpen] = useState(false);
+  const [closedDates, setClosedDates] = useState([]);
+  const [closedDatesLoading, setClosedDatesLoading] = useState(false);
+  const [newClosedDate, setNewClosedDate] = useState({
+    start_date: '',
+    end_date: '',
+    reason: '',
+  });
+  const [addingClosedDate, setAddingClosedDate] = useState(false);
 
   const searchTimeoutRef = useRef(null);
   const handleSearchChange = (e) => {
@@ -61,9 +84,84 @@ export const AdminReservations = () => {
     }
   };
 
+  const fetchClosedDates = async () => {
+    try {
+      setClosedDatesLoading(true);
+      const res = await request.get(API_ENDPOINTS.ADMIN.CLOSED_DATES.LIST);
+      if (res.success && res.data) {
+        setClosedDates(res.data);
+      }
+    } catch (err) {
+      console.warn('Failed to load closed dates:', err);
+    } finally {
+      setClosedDatesLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchReservations(1, pagination.limit);
   }, [debouncedSearch, statusFilter]);
+
+  const handleOpenClosedDates = () => {
+    fetchClosedDates();
+    setNewClosedDate({
+      start_date: '',
+      end_date: '',
+      reason: '',
+    });
+    setClosedDatesModalOpen(true);
+  };
+
+  const handleAddClosedDate = async (e) => {
+    e.preventDefault();
+    if (!newClosedDate.reason || !newClosedDate.start_date || !newClosedDate.end_date) {
+      toast.error('Harap isi alasan, tanggal mulai, dan tanggal selesai');
+      return;
+    }
+
+    try {
+      setAddingClosedDate(true);
+      const res = await request.post(API_ENDPOINTS.ADMIN.CLOSED_DATES.CREATE, {
+        start_date: newClosedDate.start_date,
+        end_date: newClosedDate.end_date,
+        reason: newClosedDate.reason,
+        is_closed: 1,
+      });
+      if (res.success) {
+        toast.success(res.message || 'Tanggal reservasi berhasil ditutup');
+        setNewClosedDate({ start_date: '', end_date: '', reason: '' });
+        fetchClosedDates();
+      }
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Gagal menutup tanggal reservasi');
+    } finally {
+      setAddingClosedDate(false);
+    }
+  };
+
+  const handleToggleClosedDate = async (id) => {
+    try {
+      const res = await request.put(API_ENDPOINTS.ADMIN.CLOSED_DATES.TOGGLE(id));
+      if (res.success) {
+        toast.success(res.message);
+        fetchClosedDates();
+      }
+    } catch (err) {
+      toast.error('Gagal mengubah status tanggal');
+    }
+  };
+
+  const handleDeleteClosedDate = async (id) => {
+    try {
+      const res = await request.delete(API_ENDPOINTS.ADMIN.CLOSED_DATES.DELETE(id));
+      if (res.success) {
+        toast.success(res.message || 'Tanggal reservasi telah dibuka kembali');
+        fetchClosedDates();
+      }
+    } catch (err) {
+      toast.error('Gagal menghapus penutupan tanggal');
+    }
+  };
 
   const handleUpdateStatus = async (id, status) => {
     try {
@@ -79,22 +177,39 @@ export const AdminReservations = () => {
 
   const handleChatGuest = (r) => {
     const cleanPhone = r.guest_phone.replace(/^0/, '62').replace(/[^\d]/g, '');
+    const priceText = r.total_price ? `Rp ${Number(r.total_price).toLocaleString('id-ID')}` : '-';
+    const discountText = r.discount_percent > 0 ? ` (Sudah termasuk Diskon Member HCH ${r.discount_percent}%)` : '';
+    
     const text = encodeURIComponent(
-      `Halo ${r.guest_name},\nKami dari Manajemen Hotel Celebes Hasanuddin Makassar mengonfirmasi reservasi kamar ${r.room_type} untuk periode ${r.check_in} s/d ${r.check_out}.\nApakah ada permintaan khusus yang perlu kami siapkan?`
+      `Halo ${r.guest_name},\nKami dari Resepsionis Hotel Celebes Hasanuddin Makassar mengonfirmasi reservasi kamar ${r.room_type} untuk periode ${r.check_in} s/d ${r.check_out} via aplikasi HCH.\n\n` +
+      `Detail Pemesanan:\n- Jumlah Kamar: ${r.num_rooms}\n- Jumlah Tamu: ${r.num_guests}\n- Total Pembayaran Cashless: ${priceText}${discountText}\n\n` +
+      `Untuk mengonfirmasi dan mengamankan kamar Anda, mohon lakukan pelunasan cashless via transfer sebelum check-in ke rekening resmi kami:\nBank BCA: 123-456-7890 a/n Hotel Celebes Hasanuddin\n\nTerima kasih atas kepercayaannya!`
     );
     window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
   };
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
-          <CalendarDays className="w-5 h-5 text-red-600" />
-          Data Permintaan Reservasi Kamar
-        </h2>
-        <p className="text-xs text-slate-500">
-          Kelola booking kamar yang masuk dari tamu web dan hubungi via WhatsApp untuk konfirmasi.
-        </p>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+            <CalendarDays className="w-5 h-5 text-red-600" />
+            Data Permintaan Reservasi Kamar
+          </h2>
+          <p className="text-xs text-slate-500">
+            Kelola booking kamar yang masuk dari tamu aplikasi HCH dan hubungi via WhatsApp untuk konfirmasi pelunasan cashless.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleOpenClosedDates}
+          className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 self-start sm:self-auto"
+        >
+          <CalendarX className="w-4 h-4 text-amber-400" />
+          <span>Buka / Tutup Tanggal Reservasi</span>
+        </button>
       </div>
 
       {/* Filter & Search */}
@@ -105,7 +220,7 @@ export const AdminReservations = () => {
             value={search}
             onChange={handleSearchChange}
             placeholder="Cari nama tamu, nomor HP, atau tipe kamar..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
           />
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
         </div>
@@ -131,15 +246,15 @@ export const AdminReservations = () => {
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[850px] text-left text-xs">
+          <table className="w-full min-w-[900px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-100 whitespace-nowrap">
               <tr>
                 <th className="py-3 px-4">Nama Tamu & HP</th>
                 <th className="py-3 px-4">Tipe Kamar</th>
                 <th className="py-3 px-4">Periode Menginap</th>
-                <th className="py-3 px-4">Jumlah</th>
+                <th className="py-3 px-4">Harga & Diskon HCH</th>
                 <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4 text-center">Aksi Hubungi</th>
+                <th className="py-3 px-4 text-center">Aksi Hubungi (Cashless)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -165,16 +280,38 @@ export const AdminReservations = () => {
                     <td className="py-3 px-4 whitespace-nowrap">
                       <div className="font-bold text-slate-800">{r.guest_name}</div>
                       <div className="text-[10px] text-slate-400 font-mono">{r.guest_phone}</div>
+                      <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-red-50 text-red-700 font-bold text-[9px] border border-red-200">
+                        {r.source === 'hch_app' ? 'Aplikasi HCH Member' : 'Web Booking'}
+                      </span>
                     </td>
-                    <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{r.room_type}</td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <div className="font-bold text-slate-900">{r.room_type}</div>
+                      <div className="text-[10px] text-slate-400">
+                        {r.num_rooms} Kamar • {r.num_guests} Tamu
+                      </div>
+                    </td>
                     <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
-                      <div>
+                      <div className="font-medium">
                         {new Date(r.check_in).toLocaleDateString('id-ID')} s/d{' '}
                         {new Date(r.check_out).toLocaleDateString('id-ID')}
                       </div>
                     </td>
-                    <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
-                      {r.num_rooms} Kamar • {r.num_guests} Tamu
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {r.total_price ? (
+                        <div>
+                          <div className="font-bold text-slate-900">
+                            Rp {Number(r.total_price).toLocaleString('id-ID')}
+                          </div>
+                          {Number(r.discount_percent) > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600">
+                              <Percent className="w-3 h-3" />
+                              Hemat {r.discount_percent}% (Rp {Number(r.discount_amount || 0).toLocaleString('id-ID')})
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 italic">Konfirmasi WA</span>
+                      )}
                     </td>
                     <td className="py-2.5 px-4 text-center whitespace-nowrap min-w-[130px]">
                       <Select
@@ -194,10 +331,10 @@ export const AdminReservations = () => {
                       <button
                         type="button"
                         onClick={() => handleChatGuest(r)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
                       >
                         <MessageCircle className="w-3.5 h-3.5" />
-                        <span>Chat WA</span>
+                        <span>Chat WA & Minta Pelunasan</span>
                       </button>
                     </td>
                   </tr>
@@ -213,6 +350,149 @@ export const AdminReservations = () => {
           onLimitChange={(l) => fetchReservations(1, l)}
         />
       </div>
+
+      {/* Modal Buka / Tutup Tanggal Reservasi (Blackout Dates) */}
+      <Modal
+        isOpen={closedDatesModalOpen}
+        onClose={() => setClosedDatesModalOpen(false)}
+        title="Buka / Tutup Tanggal Reservasi (Blackout Dates)"
+        subtitle="Kunci tanggal tertentu agar tidak dapat dibooking oleh tamu (misal: Malam Tahun Baru / High Season)"
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-5">
+          {/* Form Tutup Tanggal Baru */}
+          <form onSubmit={handleAddClosedDate} className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3">
+            <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+              <Plus className="w-4 h-4 text-red-600" />
+              Tutup Periode Tanggal Baru
+            </h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-3">
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Alasan / Nama Acara Penutupan *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Malam Tahun Baru 2027 (Belum ada harga resmi)"
+                  value={newClosedDate.reason}
+                  onChange={(e) => setNewClosedDate({ ...newClosedDate, reason: e.target.value })}
+                  className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Mulai Ditutup (Check-in) *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={newClosedDate.start_date}
+                  onChange={(e) => setNewClosedDate({ ...newClosedDate, start_date: e.target.value })}
+                  className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Selesai Ditutup (Check-out) *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={newClosedDate.end_date}
+                  onChange={(e) => setNewClosedDate({ ...newClosedDate, end_date: e.target.value })}
+                  className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                />
+              </div>
+
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  disabled={addingClosedDate}
+                  className="w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50"
+                >
+                  <CalendarX className="w-3.5 h-3.5" />
+                  <span>{addingClosedDate ? 'Menyimpan...' : 'Kunci Tanggal'}</span>
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {/* List Blackout Dates */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-extrabold text-slate-800">
+              Daftar Tanggal Yang Saat Ini Ditutup:
+            </h4>
+
+            {closedDatesLoading ? (
+              <div className="py-4 text-center text-xs text-slate-400">Memuat data tanggal...</div>
+            ) : closedDates.length === 0 ? (
+              <div className="p-4 bg-slate-50 rounded-xl text-center text-xs text-slate-400 border border-slate-200">
+                Belum ada tanggal yang ditutup. Semua tanggal dapat dibooking secara normal.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+                {closedDates.map((item) => (
+                  <div key={item.id} className="p-3 bg-white flex items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <CalendarX className="w-3.5 h-3.5 text-red-600" />
+                        <span>{item.reason}</span>
+                        {!item.is_closed && (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                            (Dibuka Kembali)
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-slate-500 text-[11px] mt-0.5">
+                        Periode: {new Date(item.start_date).toLocaleDateString('id-ID')} s/d {new Date(item.end_date).toLocaleDateString('id-ID')}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleClosedDate(item.id)}
+                        className={`p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                          item.is_closed
+                            ? 'text-red-700 bg-red-50 hover:bg-red-100'
+                            : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                        }`}
+                        title={item.is_closed ? 'Buka tanggal ini' : 'Tutup kembali tanggal ini'}
+                      >
+                        {item.is_closed ? <ToggleRight className="w-4 h-4 text-red-600" /> : <ToggleLeft className="w-4 h-4 text-emerald-600" />}
+                        <span>{item.is_closed ? 'Tutup Aktif' : 'Terbuka'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteClosedDate(item.id)}
+                        className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
+                        title="Hapus penutupan tanggal"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={() => setClosedDatesModalOpen(false)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition"
+            >
+              Tutup Modal
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

@@ -70,7 +70,7 @@ const ProtectedAdminRoute = () => {
     );
   }
 
-  if (!isAuthenticated || !['admin', 'staff', 'kasir'].includes(user?.role)) {
+  if (!isAuthenticated || !['admin', 'supervisor', 'resepsionis', 'staff', 'kasir'].includes(user?.role)) {
     return <Navigate to="/login" replace />;
   }
 
@@ -79,6 +79,9 @@ const ProtectedAdminRoute = () => {
 
 export default function App() {
   const location = useLocation();
+  const { user, isAuthenticated } = useAuth();
+  const isStaffRole = isAuthenticated && ['admin', 'supervisor', 'resepsionis', 'staff', 'kasir'].includes(user?.role);
+  const isMemberView = !location.pathname.startsWith('/admin') && !['/login', '/register'].includes(location.pathname);
 
   // Add background styling to body if on member page (mobile preview frame on large screen)
   React.useEffect(() => {
@@ -91,6 +94,25 @@ export default function App() {
 
   return (
     <>
+      {/* Shortcut bar for Admin / Supervisor / Resepsionis when viewing guest mode */}
+      {isStaffRole && isMemberView && (
+        <div className="bg-slate-900 text-white px-4 py-2 flex items-center justify-between text-xs sticky top-0 z-50 border-b border-slate-800 shadow-md">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="text-slate-300 font-medium">
+              Pratinjau Tamu • Login: <strong className="text-amber-400 capitalize">{user?.role} ({user?.name})</strong>
+            </span>
+          </div>
+          <Link
+            to="/admin"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold transition shadow-xs"
+          >
+            <span>Kembali ke Admin Panel</span>
+            <span className="text-xs">&rarr;</span>
+          </Link>
+        </div>
+      )}
+
       <Toaster
         position="top-center"
         toastOptions={{

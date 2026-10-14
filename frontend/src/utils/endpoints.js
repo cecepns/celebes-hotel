@@ -1,9 +1,17 @@
 export const API_ENDPOINTS = {
+  PUBLIC: {
+    SETTINGS: '/settings/public',
+    ROOMS: '/rooms',
+    CLOSED_DATES: '/closed-dates/public',
+  },
   SETTINGS: {
     PUBLIC: '/settings/public',
   },
   ROOMS: {
     PUBLIC: '/rooms',
+  },
+  CLOSED_DATES: {
+    PUBLIC: '/closed-dates/public',
   },
   AUTH: {
     LOGIN: '/auth/login',
@@ -42,6 +50,9 @@ export const API_ENDPOINTS = {
     TRANSACTIONS: {
       LIST: '/admin/transactions',
       CREATE: '/admin/transactions',
+      UPDATE: (id) => `/admin/transactions/${id}`,
+      DELETE: (id) => `/admin/transactions/${id}`,
+      MANUAL_BONUS: '/admin/transactions/manual-bonus',
       EXPORT: '/admin/transactions/export',
     },
     REWARDS: {
@@ -55,15 +66,25 @@ export const API_ENDPOINTS = {
       CREATE: '/admin/missions',
       UPDATE: (id) => `/admin/missions/${id}`,
       DELETE: (id) => `/admin/missions/${id}`,
+      CLAIMS: '/admin/mission-claims',
+      APPROVE_CLAIM: (id) => `/admin/mission-claims/${id}/approve`,
+      REJECT_CLAIM: (id) => `/admin/mission-claims/${id}/reject`,
     },
     VOUCHERS: {
       LIST: '/admin/vouchers',
       CHECK: (code) => `/admin/vouchers/check/${encodeURIComponent(code)}`,
       VERIFY: '/admin/vouchers/verify',
+      CANCEL: (id) => `/admin/vouchers/${id}/cancel`,
     },
     RESERVATIONS: {
       LIST: '/admin/reservations',
       UPDATE: (id) => `/admin/reservations/${id}`,
+    },
+    CLOSED_DATES: {
+      LIST: '/admin/closed-dates',
+      CREATE: '/admin/closed-dates',
+      TOGGLE: (id) => `/admin/closed-dates/${id}/toggle`,
+      DELETE: (id) => `/admin/closed-dates/${id}`,
     },
     ROOMS: {
       LIST: '/admin/rooms',

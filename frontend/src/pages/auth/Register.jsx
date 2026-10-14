@@ -8,8 +8,10 @@ import {
   Phone,
   User,
   Mail,
+  Calendar,
   ArrowRight,
-  Sparkles,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -18,7 +20,7 @@ export const Register = () => {
   const { login, isAuthenticated, user, loading: authLoading } = useAuth();
 
   if (!authLoading && isAuthenticated) {
-    if (user?.role === 'admin' || user?.role === 'staff') {
+    if (['admin', 'supervisor', 'resepsionis', 'kasir', 'staff'].includes(user?.role)) {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/" replace />;
@@ -28,8 +30,10 @@ export const Register = () => {
     name: '',
     phone: '',
     email: '',
+    birth_date: '',
     password: '',
   });
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -61,9 +65,9 @@ export const Register = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4">
-      <div className="w-full max-w-sm bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200/80">
+      <div className="w-full max-w-sm bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200/80 my-6">
         <div className="text-center mb-6">
-          <img src="/logo.png" alt="Celebes Hotel" className="h-10 mx-auto object-contain mb-3" />
+          <img src="/logo-hch.jpeg" alt="Royalti Reward HCH" className="h-16 mx-auto object-contain mb-3 rounded-2xl shadow-sm" />
           <h2 className="text-lg font-black text-slate-900 tracking-tight">Daftar Member Baru</h2>
           <p className="text-xs text-slate-500 mt-0.5">Program Royalti Reward HCH</p>
         </div>
@@ -100,6 +104,20 @@ export const Register = () => {
           </div>
 
           <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Tanggal Lahir *</label>
+            <div className="relative">
+              <input
+                type="date"
+                required
+                value={formData.birth_date}
+                onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
+                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              />
+              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            </div>
+          </div>
+
+          <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Email (Opsional)</label>
             <div className="relative">
               <input
@@ -117,14 +135,22 @@ export const Register = () => {
             <label className="block text-xs font-bold text-slate-700 mb-1">Kata Sandi *</label>
             <div className="relative">
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="Minimal 6 karakter"
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-10 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
               />
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-2.5 p-0.5 text-slate-400 hover:text-slate-600 transition"
+                title={showPassword ? 'Sembunyikan sandi' : 'Lihat sandi'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
@@ -138,10 +164,10 @@ export const Register = () => {
           </button>
         </form>
 
-        <div className="mt-6 text-center text-xs text-slate-500">
-          Sudah memiliki akun member?{' '}
+        <div className="mt-5 text-center text-xs text-slate-500">
+          Sudah memiliki akun?{' '}
           <Link to="/login" className="text-red-600 font-bold hover:underline">
-            Masuk di sini
+            Masuk Sekarang
           </Link>
         </div>
       </div>

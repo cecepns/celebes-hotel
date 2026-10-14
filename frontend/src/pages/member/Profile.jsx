@@ -18,6 +18,9 @@ import {
   ChevronRight,
   Sparkles,
   ExternalLink,
+  Calendar,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -31,10 +34,13 @@ export const Profile = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const [editForm, setEditForm] = useState({
     name: user?.name || '',
     email: user?.email || '',
+    birth_date: user?.birth_date ? user.birth_date.slice(0, 10) : '',
   });
 
   const [passwordForm, setPasswordForm] = useState({
@@ -213,6 +219,18 @@ export const Profile = () => {
               </span>
               <span className="font-bold text-slate-800">{user?.email || '-'}</span>
             </div>
+
+            <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+              <span className="text-slate-500 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-slate-400" />
+                Tanggal Lahir
+              </span>
+              <span className="font-bold text-slate-800">
+                {user?.birth_date
+                  ? new Date(user.birth_date).toLocaleDateString('id-ID', { dateStyle: 'long' })
+                  : 'Belum diisi'}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -235,21 +253,29 @@ export const Profile = () => {
           <button
             type="button"
             onClick={() => {
-              setEditForm({ name: user?.name || '', email: user?.email || '' });
+              setEditForm({
+                name: user?.name || '',
+                email: user?.email || '',
+                birth_date: user?.birth_date ? user.birth_date.slice(0, 10) : '',
+              });
               setEditModalOpen(true);
             }}
             className="w-full bg-white hover:bg-slate-50 text-slate-800 p-3.5 rounded-2xl border border-slate-200/80 text-xs font-bold transition flex items-center justify-between"
           >
             <div className="flex items-center gap-2.5">
               <Edit3 className="w-4 h-4 text-slate-500" />
-              <span>Edit Nama & Email</span>
+              <span>Edit Nama, Email & Tanggal Lahir</span>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400" />
           </button>
 
           <button
             type="button"
-            onClick={() => setPasswordModalOpen(true)}
+            onClick={() => {
+              setShowOldPassword(false);
+              setShowNewPassword(false);
+              setPasswordModalOpen(true);
+            }}
             className="w-full bg-white hover:bg-slate-50 text-slate-800 p-3.5 rounded-2xl border border-slate-200/80 text-xs font-bold transition flex items-center justify-between"
           >
             <div className="flex items-center gap-2.5">
@@ -285,7 +311,7 @@ export const Profile = () => {
               required
               value={editForm.name}
               onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
             />
           </div>
 
@@ -296,7 +322,17 @@ export const Profile = () => {
               value={editForm.email}
               onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
               placeholder="nama@email.com"
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Tanggal Lahir</label>
+            <input
+              type="date"
+              value={editForm.birth_date}
+              onChange={(e) => setEditForm({ ...editForm, birth_date: e.target.value })}
+              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
             />
           </div>
 
@@ -329,26 +365,44 @@ export const Profile = () => {
         <form onSubmit={handleChangePassword} className="space-y-3">
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Password Lama</label>
-            <input
-              type="password"
-              required
-              value={passwordForm.oldPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, oldPassword: e.target.value })}
-              placeholder="Masukkan password saat ini"
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-            />
+            <div className="relative">
+              <input
+                type={showOldPassword ? 'text' : 'password'}
+                required
+                value={passwordForm.oldPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, oldPassword: e.target.value })}
+                placeholder="Masukkan password saat ini"
+                className="w-full text-xs p-2.5 pr-10 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
+              />
+              <button
+                type="button"
+                onClick={() => setShowOldPassword(!showOldPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+              >
+                {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Password Baru</label>
-            <input
-              type="password"
-              required
-              value={passwordForm.newPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-              placeholder="Minimal 6 karakter"
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-            />
+            <div className="relative">
+              <input
+                type={showNewPassword ? 'text' : 'password'}
+                required
+                value={passwordForm.newPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                placeholder="Minimal 6 karakter"
+                className="w-full text-xs p-2.5 pr-10 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword(!showNewPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+              >
+                {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-3">

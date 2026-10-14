@@ -28,20 +28,27 @@ export const AdminLayout = () => {
 
   const menuItems = [
     { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-    { to: '/admin/users', label: 'Manajemen User', icon: UserCog, adminOnly: true },
+    { to: '/admin/users', label: 'Manajemen User', icon: UserCog, roles: ['admin'] },
     { to: '/admin/members', label: 'Data Tamu / Member', icon: Users },
     { to: '/admin/rooms', label: 'Kelola Kamar', icon: Bed },
     { to: '/admin/reservations', label: 'Data Reservasi', icon: CalendarDays },
-    { to: '/admin/transactions', label: 'Input Transaksi & Poin', icon: Receipt },
+    { to: '/admin/transactions', label: 'Transaksi & Poin', icon: Receipt },
     { to: '/admin/rewards', label: 'Katalog Reward', icon: Gift },
-    { to: '/admin/missions', label: 'Kelola Misi', icon: Trophy, adminOnly: true },
+    { to: '/admin/missions', label: 'Misi & Approval Klaim', icon: Trophy, roles: ['admin', 'supervisor'] },
     { to: '/admin/vouchers', label: 'Verifikasi Voucher', icon: TicketCheck },
-    { to: '/admin/settings', label: 'Pengaturan Sistem', icon: Settings, adminOnly: true },
+    { to: '/admin/settings', label: 'Pengaturan Sistem', icon: Settings, roles: ['admin'] },
   ];
 
   const filteredMenuItems = menuItems.filter(
-    (item) => !item.adminOnly || user?.role === 'admin'
+    (item) => !item.roles || item.roles.includes(user?.role)
   );
+
+  const getRoleLabel = (role) => {
+    if (role === 'admin') return 'Admin / Management';
+    if (role === 'supervisor') return 'Supervisor';
+    if (role === 'resepsionis' || role === 'kasir') return 'Receptionist / Kasir';
+    return role || 'Staff';
+  };
 
   const handleLogout = () => {
     logout();
@@ -65,9 +72,13 @@ export const AdminLayout = () => {
           }`}
       >
         {/* Brand Header */}
-        <div className="h-18 px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center">
-            <img src="/logo.png" alt="Celebes Hotel" className="h-10 w-auto bg-white p-1 rounded-xl shadow-xs" />
+        <div className="h-18 px-6 py-3 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <img src="/logo-hch.jpeg" alt="Celebes Hotel" className="h-10 w-10 object-cover bg-white rounded-xl shadow-xs" />
+            <div>
+              <p className="text-xs font-black tracking-wider text-amber-400">HOTEL CELEBES</p>
+              <p className="text-[10px] text-slate-400 font-medium">Royalti Reward HCH</p>
+            </div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -79,14 +90,14 @@ export const AdminLayout = () => {
         </div>
 
         {/* Current User Pill */}
-        <div className="px-6 py-4 border-b border-slate-800/60 bg-slate-950/40">
+        <div className="px-6 py-3.5 border-b border-slate-800/60 bg-slate-950/40">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-red-600/20 border border-red-500/30 flex items-center justify-center text-red-400 font-bold text-sm">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div className="overflow-hidden">
               <p className="text-sm font-semibold text-slate-200 truncate">{user?.name || 'Administrator'}</p>
-              <p className="text-xs text-slate-400 capitalize">{user?.role || 'Admin'} • Online</p>
+              <p className="text-xs text-amber-400 font-semibold truncate">{getRoleLabel(user?.role)} • Online</p>
             </div>
           </div>
         </div>

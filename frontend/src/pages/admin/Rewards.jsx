@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { request } from '@/utils/request';
 import { API_ENDPOINTS } from '@/utils/endpoints';
+import { useAuth } from '@/context/AuthContext';
 import {
   Gift,
   Search,
@@ -11,6 +12,7 @@ import {
   CheckCircle2,
   XCircle,
   Tag,
+  Info,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -21,6 +23,7 @@ import { Select } from '@/components/common/Select';
 import toast from 'react-hot-toast';
 
 export const AdminRewards = () => {
+  const { isSuperAdmin } = useAuth();
   const [rewards, setRewards] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -187,15 +190,26 @@ export const AdminRewards = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-red-200 transition flex items-center gap-1.5 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Reward</span>
-        </button>
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={handleOpenCreate}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-red-200 transition flex items-center gap-1.5 self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Reward</span>
+          </button>
+        )}
       </div>
+
+      {!isSuperAdmin && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-center gap-2">
+          <Info className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Informasi Akses:</strong> Pembuatan, pengubahan, dan penghapusan katalog reward voucher hanya dapat dilakukan oleh Admin. Resepsionis dan Supervisor dapat memverifikasi penggunaan voucher di menu Validasi Voucher.
+          </span>
+        </div>
+      )}
 
       {/* Filter & Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -205,7 +219,7 @@ export const AdminRewards = () => {
             value={search}
             onChange={handleSearchChange}
             placeholder="Cari judul reward atau ketentuan..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
           />
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
         </div>
@@ -241,19 +255,19 @@ export const AdminRewards = () => {
                 <th className="py-3 px-4">Poin Diperlukan</th>
                 <th className="py-3 px-4">Ketentuan & Syarat</th>
                 <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4 text-center">Aksi</th>
+                {isSuperAdmin && <th className="py-3 px-4 text-center">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="py-6">
-                    <TableSkeleton rows={5} cols={6} />
+                  <td colSpan={isSuperAdmin ? 6 : 5} className="py-6">
+                    <TableSkeleton rows={5} cols={isSuperAdmin ? 6 : 5} />
                   </td>
                 </tr>
               ) : rewards.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="py-8">
+                  <td colSpan={isSuperAdmin ? 6 : 5} className="py-8">
                     <EmptyState
                       icon={Gift}
                       title="Tidak Ada Reward"
@@ -286,26 +300,28 @@ export const AdminRewards = () => {
                         {r.is_active ? 'Aktif' : 'Nonaktif'}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-center whitespace-nowrap">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit(r)}
-                          className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition"
-                          title="Edit Reward"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDelete(r)}
-                          className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
-                          title="Hapus Reward"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
+                    {isSuperAdmin && (
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(r)}
+                            className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition"
+                            title="Edit Reward"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDelete(r)}
+                            className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
+                            title="Hapus Reward"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

@@ -22,8 +22,9 @@ CREATE TABLE users (
   name VARCHAR(150) NOT NULL,
   phone VARCHAR(30) NOT NULL UNIQUE,
   email VARCHAR(150) NULL UNIQUE,
+  birth_date DATE NULL,
   password VARCHAR(255) NOT NULL,
-  role ENUM('admin', 'kasir', 'staff', 'member') DEFAULT 'member',
+  role ENUM('admin', 'supervisor', 'resepsionis', 'kasir', 'staff', 'member') DEFAULT 'member',
   member_code VARCHAR(50) NOT NULL UNIQUE,
   avatar VARCHAR(255) NULL,
   total_points INT DEFAULT 0,
@@ -124,11 +125,13 @@ CREATE TABLE reward_redemptions (
   reward_id INT NOT NULL,
   voucher_code VARCHAR(60) NOT NULL UNIQUE,
   points_used INT NOT NULL,
-  status ENUM('active', 'used', 'expired', 'cancelled') DEFAULT 'active',
+  status ENUM('pending', 'active', 'used', 'expired', 'cancelled') DEFAULT 'active',
   redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   valid_until DATETIME NOT NULL,
   used_at DATETIME NULL,
   used_notes VARCHAR(255) NULL,
+  room_number VARCHAR(50) NULL,
+  claim_note VARCHAR(255) NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (reward_id) REFERENCES rewards(id) ON DELETE CASCADE,
   INDEX idx_voucher_code (voucher_code)
@@ -145,7 +148,10 @@ CREATE TABLE user_missions (
   status ENUM('pending', 'approved', 'rejected') DEFAULT 'approved',
   proof_note VARCHAR(255) NULL,
   proof_file VARCHAR(255) NULL,
-  awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  room_number VARCHAR(50) NULL,
+  admin_note VARCHAR(255) NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  awarded_at DATETIME NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
   INDEX idx_user_mission (user_id, mission_id, period_key)
@@ -182,10 +188,27 @@ CREATE TABLE reservations (
   check_out DATE NOT NULL,
   num_rooms INT DEFAULT 1,
   num_guests INT DEFAULT 2,
+  discount_percent DECIMAL(5,2) DEFAULT 0,
+  discount_amount DECIMAL(15,2) DEFAULT 0,
+  total_price DECIMAL(15,2) DEFAULT 0,
+  source VARCHAR(50) DEFAULT 'app_hch',
   notes TEXT NULL,
-  status ENUM('inquiry', 'confirmed', 'cancelled') DEFAULT 'inquiry',
+  status ENUM('inquiry', 'confirmed', 'checked_in', 'completed', 'cancelled') DEFAULT 'inquiry',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------
+-- 11. Tabel Closed Dates (Buka / Tutup Tanggal Reservasi)
+-- ----------------------------------------------------------
+CREATE TABLE closed_dates (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  reason VARCHAR(255) NOT NULL,
+  is_closed TINYINT(1) DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_dates (start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================================
@@ -203,16 +226,16 @@ INSERT INTO settings (setting_key, setting_value, description) VALUES
 ('hotel_tagline', 'Royalti Reward HCH', 'Tagline Loyalty Program'),
 ('hotel_address', 'Jl. Sultan Hasanuddin No. 2 Makassar', 'Alamat Hotel'),
 ('hotel_phone', '+62411 3620770', 'Nomor Telepon Kantor'),
-('instagram_username', 'celebeshtl', 'Akun Instagram');
+('instagram_username', 'celebeshtl', 'Akun Instagram'),
+('hch_member_discount_percent', '10', 'Persentase diskon reservasi kamar via aplikasi HCH (%)');
 
--- Users (admin: admin / admin123, member demo: budi / 123456)
--- Password hashes: bcrypt hash for 'admin123' and '123456'
--- $2b$10$wO7vK9uFm9mXWcE6LgA4f.3hPjC8b5Z1FkL4Q1q2w3e4r5t6y7u8i -> generated runtime or known hash
--- We will insert bcrypt hashes in server.js or insert demo users
+-- Users (admin: admin / admin123, supervisor: supervisor / admin123, resepsionis: reception / admin123, member demo: rosdiana / 123456)
 INSERT INTO users (id, name, phone, email, password, role, member_code, total_points, created_at) VALUES
 (1, 'Administrator HCH', '081234567890', 'admin@celebeshotel.com', '$2b$10$EPfWkJ143tN2FwO8KvZ20.Z7Q/6l10UHQzW9fXqB8h7iG0lT7g7e.', 'admin', 'HCH-ADMIN-01', 0, NOW()),
-(2, 'Ibu Hj. Rosdiana', '081212127688', 'rosdiana@example.com', '$2b$10$EPfWkJ143tN2FwO8KvZ20.Z7Q/6l10UHQzW9fXqB8h7iG0lT7g7e.', 'member', 'HCH-88219', 2026, DATE_SUB(NOW(), INTERVAL 60 DAY)),
-(3, 'Andi Pratama', '081299887766', 'andi@example.com', '$2b$10$EPfWkJ143tN2FwO8KvZ20.Z7Q/6l10UHQzW9fXqB8h7iG0lT7g7e.', 'member', 'HCH-88220', 350, DATE_SUB(NOW(), INTERVAL 20 DAY));
+(2, 'Supervisor HCH', '081234567891', 'supervisor@celebeshotel.com', '$2b$10$EPfWkJ143tN2FwO8KvZ20.Z7Q/6l10UHQzW9fXqB8h7iG0lT7g7e.', 'supervisor', 'HCH-SPV-01', 0, NOW()),
+(3, 'Resepsionis Front Desk', '081234567892', 'reception@celebeshotel.com', '$2b$10$EPfWkJ143tN2FwO8KvZ20.Z7Q/6l10UHQzW9fXqB8h7iG0lT7g7e.', 'resepsionis', 'HCH-RCP-01', 0, NOW()),
+(4, 'Ibu Hj. Rosdiana', '081212127688', 'rosdiana@example.com', '$2b$10$EPfWkJ143tN2FwO8KvZ20.Z7Q/6l10UHQzW9fXqB8h7iG0lT7g7e.', 'member', 'HCH-88219', 2026, DATE_SUB(NOW(), INTERVAL 60 DAY)),
+(5, 'Andi Pratama', '081299887766', 'andi@example.com', '$2b$10$EPfWkJ143tN2FwO8KvZ20.Z7Q/6l10UHQzW9fXqB8h7iG0lT7g7e.', 'member', 'HCH-88220', 350, DATE_SUB(NOW(), INTERVAL 20 DAY));
 
 -- Seed Rooms
 INSERT INTO rooms (id, name, description, price, capacity, total_rooms, facilities, is_active) VALUES

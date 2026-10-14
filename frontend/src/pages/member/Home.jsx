@@ -30,25 +30,45 @@ export const Home = () => {
     total_points: user?.total_points || 0,
     expiring_points_30d: 0,
   });
+  const [settings, setSettings] = useState({
+    spending_unit_amount: '50000',
+    points_per_unit: '5',
+    hch_member_discount_percent: '10',
+    whatsapp_number: '6282189001285',
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchDashboard = async () => {
-      if (isAuthenticated) {
-        try {
-          const res = await request.get(API_ENDPOINTS.MEMBER.DASHBOARD);
-          if (res.success && res.data) {
-            setDashboard(res.data);
-          }
-        } catch (err) {
-          console.error('Failed to fetch dashboard:', err);
+    const fetchDashboardAndSettings = async () => {
+      try {
+        const setRes = await request.get(API_ENDPOINTS.PUBLIC.SETTINGS);
+        if (setRes.success && setRes.data) {
+          setSettings(setRes.data);
         }
+
+        if (isAuthenticated) {
+          const dashRes = await request.get(API_ENDPOINTS.MEMBER.DASHBOARD);
+          if (dashRes.success && dashRes.data) {
+            setDashboard(dashRes.data);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch home data:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
-    fetchDashboard();
+    fetchDashboardAndSettings();
   }, [isAuthenticated]);
+
+  // Dynamic calculations
+  const unitAmount = Number(settings.spending_unit_amount) || 50000;
+  const pointsPerUnit = Number(settings.points_per_unit) || 5;
+  const exampleAmount = 350000;
+  const exampleUnits = Math.floor(exampleAmount / unitAmount);
+  const examplePoints = exampleUnits * pointsPerUnit;
+  const exampleLeftover = exampleAmount % unitAmount;
 
   // 6 Main Grid Menus matching flyer smartphone screen
   const menuButtons = [
@@ -105,13 +125,13 @@ export const Home = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-between pb-24">
       {/* Top Header - Matches Flyer Header */}
-      <header className="bg-white px-5 py-3.5 border-b border-slate-100 flex items-center justify-between sticky top-0 z-30 shadow-xs">
-        <div className="flex items-center gap-2">
-          <img src="/logo.png" alt="Celebes Hotel" className="h-7 w-auto object-contain" />
+      <header className="bg-white px-5 py-3 border-b border-slate-100 flex items-center justify-between sticky top-0 z-30 shadow-xs">
+        <div className="flex items-center gap-2.5">
+          <img src="/logo-hch.jpeg" alt="Celebes Hotel" className="h-9 w-auto object-contain rounded-md" />
         </div>
         <div className="text-right">
           <div className="text-[13px] font-extrabold text-slate-800 tracking-tight leading-none">
-            Royalti <span className="text-slate-300">|</span> <span className="text-red-600">Program HCH</span>
+            Royalti <span className="text-slate-300">|</span> <span className="text-red-600">Reward HCH</span>
           </div>
           <div className="text-[9px] font-semibold text-slate-400 tracking-widest uppercase mt-0.5">
             Hotel Celebes Hasanuddin
@@ -256,9 +276,9 @@ export const Home = () => {
               </p>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-              <div className="text-xs font-bold text-slate-800">Prioritas Line</div>
+              <div className="text-xs font-bold text-slate-800">Diskon Khusus APK</div>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                Akses early check-in selama persediaan kamar tersedia.
+                Diskon {settings.hch_member_discount_percent || 10}% saat reservasi via aplikasi HCH.
               </p>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
@@ -271,7 +291,7 @@ export const Home = () => {
         </section>
 
         {/* ============================================================== */}
-        {/* CARA MENDAPATKAN POINT & SIMULASI (From Flyer)                 */}
+        {/* CARA MENDAPATKAN POINT & SIMULASI DINAMIS                      */}
         {/* ============================================================== */}
         <section className="bg-gradient-to-br from-slate-900 to-blue-950 text-white rounded-2xl p-4 shadow-md space-y-3">
           <div className="flex items-center justify-between">
@@ -279,7 +299,9 @@ export const Home = () => {
               <span className="text-[10px] font-bold text-red-400 tracking-wider uppercase">
                 Rumus Perolehan Poin
               </span>
-              <h4 className="text-sm font-extrabold mt-0.5">Kelipatan Rp 50.000 = 5 Point</h4>
+              <h4 className="text-sm font-extrabold mt-0.5">
+                Kelipatan Rp {unitAmount.toLocaleString('id-ID')} = {pointsPerUnit} Point
+              </h4>
             </div>
             <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-300">
               <Coins className="w-5 h-5" />
@@ -307,8 +329,9 @@ export const Home = () => {
 
           <div className="bg-white/10 rounded-xl p-3 text-[11px] leading-relaxed text-slate-200 border border-white/10">
             <span className="font-bold text-white">Contoh: </span>
-            Transaksi Rp 338.000 = 6 kelipatan (300.000) &times; 5 point ={' '}
-            <span className="text-amber-300 font-bold">30 Point</span>. Sisa Rp 38.000 belum mencapai threshold kelipatan.
+            Transaksi Rp {exampleAmount.toLocaleString('id-ID')} = {exampleUnits} kelipatan ({(exampleUnits * unitAmount).toLocaleString('id-ID')}) &times; {pointsPerUnit} point ={' '}
+            <span className="text-amber-300 font-bold">{examplePoints} Point</span>.
+            {exampleLeftover > 0 && ` Sisa Rp ${exampleLeftover.toLocaleString('id-ID')} belum mencapai batas kelipatan.`}
           </div>
         </section>
 

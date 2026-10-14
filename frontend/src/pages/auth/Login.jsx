@@ -3,7 +3,7 @@ import { useNavigate, Link, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { request } from "@/utils/request";
 import { API_ENDPOINTS } from "@/utils/endpoints";
-import { Lock, Phone, ArrowRight } from "lucide-react";
+import { Lock, Phone, ArrowRight, Eye, EyeOff } from "lucide-react";
 import toast from "react-hot-toast";
 
 export const Login = () => {
@@ -11,7 +11,7 @@ export const Login = () => {
   const { login, isAuthenticated, user, loading: authLoading } = useAuth();
 
   if (!authLoading && isAuthenticated) {
-    if (user?.role === "admin" || user?.role === "staff") {
+    if (["admin", "supervisor", "resepsionis", "kasir", "staff"].includes(user?.role)) {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/" replace />;
@@ -19,6 +19,7 @@ export const Login = () => {
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -38,7 +39,7 @@ export const Login = () => {
       if (res.success && res.data) {
         login(res.data.token, res.data.user);
         toast.success(`Selamat datang, ${res.data.user.name}!`);
-        if (res.data.user.role === "admin" || res.data.user.role === "staff") {
+        if (["admin", "supervisor", "resepsionis", "kasir", "staff"].includes(res.data.user.role)) {
           navigate("/admin");
         } else {
           navigate("/");
@@ -56,7 +57,7 @@ export const Login = () => {
       <div className="w-full max-w-sm bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200/80">
         {/* Header Logo */}
         <div className="text-center mb-6">
-          <img src="/logo.png" alt="Celebes Hotel" className="h-10 mx-auto object-contain mb-3" />
+          <img src="/logo-hch.jpeg" alt="Royalti Reward HCH" className="h-16 mx-auto object-contain mb-3 rounded-2xl shadow-sm" />
           <h2 className="text-lg font-black text-slate-900 tracking-tight">Masuk ke Akun</h2>
           <p className="text-xs text-slate-500 mt-0.5">Program Royalti Reward HCH</p>
         </div>
@@ -84,14 +85,22 @@ export const Login = () => {
             <label className="block text-xs font-bold text-slate-700 mb-1">Kata Sandi</label>
             <div className="relative">
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Masukkan kata sandi"
-                className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs pl-9 pr-10 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
               />
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-2.5 p-0.5 text-slate-400 hover:text-slate-600 transition"
+                title={showPassword ? "Sembunyikan sandi" : "Lihat sandi"}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 

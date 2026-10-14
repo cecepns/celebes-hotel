@@ -10,17 +10,16 @@ import {
   CheckCircle2,
   Calendar,
   Sparkles,
-  Crown,
-  Flame,
-  Star,
   Clock,
   Check,
+  Building,
+  AlertCircle,
+  HelpCircle,
 } from 'lucide-react';
 import { Skeleton } from '@/components/common/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Modal } from '@/components/common/Modal';
 import toast from 'react-hot-toast';
-import confetti from 'canvas-confetti';
 
 export const Missions = () => {
   const navigate = useNavigate();
@@ -32,6 +31,7 @@ export const Missions = () => {
   // Claim modal state
   const [claimModalOpen, setClaimModalOpen] = useState(false);
   const [selectedMission, setSelectedMission] = useState(null);
+  const [roomNumber, setRoomNumber] = useState('');
   const [proofNote, setProofNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -62,26 +62,38 @@ export const Missions = () => {
       return;
     }
     setSelectedMission(mission);
-    setProofNote('');
+    setRoomNumber('');
+    const todayStr = new Date().toLocaleDateString('id-ID');
+    setProofNote(`Saya atas nama ${user?.name || ''} yg hari ini tanggal ${todayStr} telah cek in d No.kamar  .`);
     setClaimModalOpen(true);
+  };
+
+  // Sync proofNote when roomNumber changes
+  const handleRoomNumberChange = (val) => {
+    setRoomNumber(val);
+    const todayStr = new Date().toLocaleDateString('id-ID');
+    setProofNote(`Saya atas nama ${user?.name || ''} yg hari ini tanggal ${todayStr} telah cek in d No.kamar ${val} .`);
   };
 
   const handleConfirmClaim = async () => {
     if (!selectedMission) return;
+    if (!roomNumber.trim()) {
+      toast.error('Harap masukkan nomor kamar Anda saat check-in');
+      return;
+    }
+
     try {
       setSubmitting(true);
       const res = await request.post(
         API_ENDPOINTS.MEMBER.CLAIM_MISSION(selectedMission.id),
-        { proof_note: proofNote }
+        {
+          proof_note: proofNote,
+          room_number: roomNumber.trim(),
+        }
       );
 
       if (res.success) {
-        confetti({
-          particleCount: 80,
-          spread: 60,
-          origin: { y: 0.6 },
-        });
-        toast.success(res.message || 'Misi berhasil diklaim!');
+        toast.success(res.message || 'Klaim misi berhasil diajukan! Menunggu approval admin.');
         setClaimModalOpen(false);
         await refreshProfile();
         await fetchMissions();
@@ -153,6 +165,14 @@ export const Missions = () => {
           </span>
         </div>
 
+        {/* Notice Stay Period Requirement */}
+        <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <p>
+            <strong>Ketentuan Klaim Misi:</strong> Klaim misi hotel hanya berlaku selama masa menginap aktif tamu dan tidak berlaku apabila telah melewati tanggal check-out. Setiap klaim akan diverifikasi dan disetujui oleh admin/resepsionis hotel.
+          </p>
+        </div>
+
         {/* Missions List */}
         {loading ? (
           <div className="space-y-3">
@@ -168,6 +188,7 @@ export const Missions = () => {
           <div className="space-y-3">
             {filteredMissions.map((m) => {
               const isCompleted = m.is_completed;
+              const isPending = m.claim_status === 'pending';
 
               return (
                 <div
@@ -175,6 +196,8 @@ export const Missions = () => {
                   className={`bg-white rounded-2xl p-4 border transition-all ${
                     isCompleted
                       ? 'border-emerald-200 bg-emerald-50/20'
+                      : isPending
+                      ? 'border-amber-200 bg-amber-50/20'
                       : 'border-slate-200/80 hover:shadow-xs'
                   }`}
                 >
@@ -184,11 +207,15 @@ export const Missions = () => {
                         <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                           {m.recurrence}
                         </span>
-                        {isCompleted && (
+                        {isCompleted ? (
                           <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <Check className="w-3 h-3" /> Selesai
+                            <Check className="w-3 h-3" /> Disetujui (+{m.bonus_points} pts)
                           </span>
-                        )}
+                        ) : isPending ? (
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> Menunggu Approval Admin
+                          </span>
+                        ) : null}
                       </div>
                       <h3 className="text-sm font-extrabold text-slate-900 mt-1.5">{m.title}</h3>
                       <p className="text-xs text-slate-500 mt-1 leading-relaxed">{m.requirement}</p>
@@ -203,16 +230,24 @@ export const Missions = () => {
 
                   <div className="mt-3.5 pt-2.5 border-t border-slate-100 flex items-center justify-between">
                     <span className="text-[10px] text-slate-400">
-                      {isCompleted ? 'Poin telah ditambahkan ke akun' : 'Selesaikan syarat di atas'}
+                      {isCompleted
+                        ? 'Poin telah ditambahkan ke akun Anda'
+                        : isPending
+                        ? 'Klaim sedang diverifikasi oleh staf hotel'
+                        : 'Selesaikan syarat di atas untuk klaim'}
                     </span>
-                    {!isCompleted ? (
+                    {!isCompleted && !isPending ? (
                       <button
                         type="button"
                         onClick={() => handleOpenClaim(m)}
                         className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-xs shadow-red-200 transition"
                       >
-                        Klaim Reward
+                        Klaim Misi
                       </button>
+                    ) : isPending ? (
+                      <span className="text-xs font-semibold text-amber-600 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" /> Menunggu Approval
+                      </span>
                     ) : (
                       <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
                         <CheckCircle2 className="w-4 h-4" /> Diklaim
@@ -230,8 +265,8 @@ export const Missions = () => {
       <Modal
         isOpen={claimModalOpen}
         onClose={() => setClaimModalOpen(false)}
-        title="Klaim Bonus Misi"
-        subtitle="Verifikasi penyelesaian misi Anda"
+        title="Klaim Bonus Misi Tamu"
+        subtitle="Verifikasi masa menginap & persetujuan pihak hotel"
       >
         {selectedMission && (
           <div className="space-y-4">
@@ -249,15 +284,38 @@ export const Missions = () => {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Catatan / Keterangan (Opsional)
+                Nomor Kamar Menginap *
+              </label>
+              <input
+                type="text"
+                required
+                value={roomNumber}
+                onChange={(e) => handleRoomNumberChange(e.target.value)}
+                placeholder="Contoh: 204 atau Premier 301"
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Wajib diisi sesuai kamar yang Anda tempati saat ini.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Format Catatan Klaim (Otomatis)
               </label>
               <textarea
                 value={proofNote}
                 onChange={(e) => setProofNote(e.target.value)}
-                placeholder="Contoh: Akun Instagram saya @budi_santoso atau No invoice kamar #INV-001"
                 rows={3}
-                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 bg-slate-50/60 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-mono text-[11px]"
               />
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-[11px] text-amber-800">
+              <p className="font-semibold">Perhatian:</p>
+              <p className="mt-0.5">
+                Klaim tidak berlaku apabila telah melewati masa menginap di hotel. Poin akan masuk ke saldo Anda setelah diverifikasi & disetujui (approval) oleh admin/resepsionis.
+              </p>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -271,10 +329,10 @@ export const Missions = () => {
               <button
                 type="button"
                 onClick={handleConfirmClaim}
-                disabled={submitting}
+                disabled={submitting || !roomNumber.trim()}
                 className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-md shadow-red-200 transition disabled:opacity-50"
               >
-                {submitting ? 'Memproses...' : 'Klaim Poin Sekarang'}
+                {submitting ? 'Mengirim Klaim...' : 'Ajukan Klaim Poin'}
               </button>
             </div>
           </div>

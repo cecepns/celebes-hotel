@@ -71,7 +71,10 @@ export const AuthProvider = ({ children }) => {
         updateUser,
         refreshProfile: fetchProfile,
         isAuthenticated: !!token,
-        isAdmin: user?.role === 'admin' || user?.role === 'staff',
+        isAdmin: ['admin', 'supervisor', 'resepsionis', 'kasir', 'staff'].includes(user?.role),
+        isSuperAdmin: user?.role === 'admin',
+        isSupervisor: user?.role === 'supervisor',
+        isReceptionist: ['resepsionis', 'kasir', 'staff'].includes(user?.role),
       }}
     >
       {children}
