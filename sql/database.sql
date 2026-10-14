@@ -88,12 +88,17 @@ CREATE TABLE transactions (
   category ENUM('kamar', 'fnb', 'drugstore', 'laundry', 'lainnya') NOT NULL,
   amount DECIMAL(15,2) NOT NULL,
   points_earned INT NOT NULL DEFAULT 0,
+  status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'approved',
   transaction_date DATE NOT NULL,
   notes TEXT NULL,
   created_by INT NULL,
+  approved_by INT NULL,
+  approved_at DATETIME NULL,
+  rejection_reason VARCHAR(255) NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_user_trans (user_id),
+  INDEX idx_status (status),
   INDEX idx_date (transaction_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

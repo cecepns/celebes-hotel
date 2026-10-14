@@ -12,6 +12,9 @@ import {
   Shirt,
   Calendar,
   Coins,
+  Clock,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import { Skeleton } from '@/components/common/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -158,11 +161,35 @@ export const Transactions = () => {
                     </div>
                   </div>
 
-                  <div className="text-right">
-                    <div className="inline-flex items-center gap-1 text-emerald-600 text-xs font-extrabold bg-emerald-50 px-2 py-0.5 rounded-lg">
-                      <Coins className="w-3.5 h-3.5" />
-                      +{item.points_earned} pts
-                    </div>
+                  <div className="text-right shrink-0">
+                    {item.status === 'pending' ? (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="inline-flex items-center gap-1 text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
+                          <Clock className="w-3 h-3 text-amber-500 animate-pulse" />
+                          Menunggu Approval
+                        </span>
+                        <span className="text-[10px] text-amber-600 font-semibold">
+                          +{item.points_earned} pts (Tertunda)
+                        </span>
+                      </div>
+                    ) : item.status === 'rejected' ? (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="inline-flex items-center gap-1 text-red-700 text-[10px] font-bold bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg">
+                          <XCircle className="w-3 h-3 text-red-500" />
+                          Ditolak
+                        </span>
+                        {item.rejection_reason && (
+                          <span className="text-[9px] text-red-500 max-w-[120px] truncate" title={item.rejection_reason}>
+                            {item.rejection_reason}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-1 text-emerald-600 text-xs font-extrabold bg-emerald-50 px-2 py-0.5 rounded-lg">
+                        <Coins className="w-3.5 h-3.5" />
+                        +{item.points_earned} pts
+                      </div>
+                    )}
                     {item.notes && (
                       <p className="text-[10px] text-slate-400 mt-1 max-w-[120px] truncate">
                         {item.notes}

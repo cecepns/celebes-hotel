@@ -116,6 +116,21 @@ WHERE NOT EXISTS (
   SELECT 1 FROM closed_dates WHERE start_date = '2026-12-31' AND end_date = '2027-01-01'
 );
 
+-- ----------------------------------------------------------
+-- 9. Tabel Transactions: Kolom Status & Approval SPV/Admin
+-- ----------------------------------------------------------
+ALTER TABLE transactions 
+  ADD COLUMN IF NOT EXISTS status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'approved' AFTER points_earned;
+
+ALTER TABLE transactions 
+  ADD COLUMN IF NOT EXISTS approved_by INT NULL AFTER created_by;
+
+ALTER TABLE transactions 
+  ADD COLUMN IF NOT EXISTS approved_at DATETIME NULL AFTER approved_by;
+
+ALTER TABLE transactions 
+  ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(255) NULL AFTER approved_at;
+
 -- ==========================================================
 -- SELESAI: Migration 20261014_roles_and_revisions.sql
 -- ==========================================================

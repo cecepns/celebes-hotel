@@ -20,6 +20,11 @@ import {
   Gift,
   AlertTriangle,
   Info,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Check,
+  X,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { Pagination } from '@/components/common/Pagination';
@@ -36,6 +41,8 @@ export const AdminTransactions = () => {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [pendingCount, setPendingCount] = useState(0);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 10,
@@ -80,6 +87,9 @@ export const AdminTransactions = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [reversalModalOpen, setReversalModalOpen] = useState(false);
   const [bonusModalOpen, setBonusModalOpen] = useState(false);
+  const [approveModalOpen, setApproveModalOpen] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [selectedTx, setSelectedTx] = useState(null);
   const [selectedMemberOption, setSelectedMemberOption] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -91,6 +101,13 @@ export const AdminTransactions = () => {
     { value: 'drugstore', label: 'Drugstore' },
     { value: 'laundry', label: 'Laundry' },
     { value: 'lainnya', label: 'Lainnya' },
+  ];
+
+  const statusFilterOptions = [
+    { value: 'all', label: 'Semua Status' },
+    { value: 'pending', label: 'Menunggu Approval' },
+    { value: 'approved', label: 'Disetujui' },
+    { value: 'rejected', label: 'Ditolak' },
   ];
 
   const categoryOptions = [
@@ -136,10 +153,14 @@ export const AdminTransactions = () => {
         limit,
         search: debouncedSearch,
         category: categoryFilter,
+        status: statusFilter,
       });
       if (res.success && res.data) {
         setTransactions(res.data);
         setPagination(res.pagination);
+        if (res.pending_count !== undefined) {
+          setPendingCount(res.pending_count);
+        }
       }
     } catch (err) {
       toast.error('Gagal mengambil data transaksi');
@@ -170,7 +191,7 @@ export const AdminTransactions = () => {
 
   useEffect(() => {
     fetchTransactions(1, pagination.limit);
-  }, [debouncedSearch, categoryFilter]);
+  }, [debouncedSearch, categoryFilter, statusFilter]);
 
   const handleOpenCreate = () => {
     const randomInv = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
@@ -201,6 +222,17 @@ export const AdminTransactions = () => {
   const handleOpenReversal = (tx) => {
     setSelectedTx(tx);
     setReversalModalOpen(true);
+  };
+
+  const handleOpenApprove = (tx) => {
+    setSelectedTx(tx);
+    setApproveModalOpen(true);
+  };
+
+  const handleOpenReject = (tx) => {
+    setSelectedTx(tx);
+    setRejectionReason('Data transaksi tidak sesuai / belum diverifikasi');
+    setRejectModalOpen(true);
   };
 
   const handleOpenBonus = () => {
@@ -306,6 +338,43 @@ export const AdminTransactions = () => {
     }
   };
 
+  const handleApproveSubmit = async () => {
+    if (!selectedTx) return;
+    try {
+      setSubmitting(true);
+      const res = await request.put(API_ENDPOINTS.ADMIN.TRANSACTIONS.APPROVE(selectedTx.id));
+      if (res.success) {
+        toast.success(res.message || 'Transaksi berhasil disetujui!');
+        setApproveModalOpen(false);
+        fetchTransactions(pagination.page, pagination.limit);
+      }
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Gagal menyetujui transaksi');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRejectSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedTx) return;
+    try {
+      setSubmitting(true);
+      const res = await request.put(API_ENDPOINTS.ADMIN.TRANSACTIONS.REJECT(selectedTx.id), {
+        reason: rejectionReason,
+      });
+      if (res.success) {
+        toast.success(res.message || 'Transaksi berhasil ditolak');
+        setRejectModalOpen(false);
+        fetchTransactions(pagination.page, pagination.limit);
+      }
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Gagal menolak transaksi');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleExportExcel = async () => {
     try {
       toast.loading('Menyiapkan file Excel transaksi...', { id: 'export-trans' });
@@ -374,7 +443,7 @@ export const AdminTransactions = () => {
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 flex items-center gap-2">
           <Info className="w-4 h-4 text-blue-600 shrink-0" />
           <span>
-            <strong>Hak Akses Receptionist:</strong> Anda dapat mendaftarkan member baru dan menginput transaksi eligible. Edit transaksi dan reversal poin membutuhkan wewenang Supervisor atau Admin.
+            <strong>Hak Akses Receptionist:</strong> Anda dapat mendaftarkan member baru dan menginput transaksi belanja/menginap. Transaksi yang Anda input memerlukan approval Supervisor atau Admin sebelum poin resmi aktif ke akun member.
           </span>
         </div>
       )}
@@ -382,14 +451,46 @@ export const AdminTransactions = () => {
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-center gap-2">
           <Info className="w-4 h-4 text-amber-600 shrink-0" />
           <span>
-            <strong>Hak Akses Supervisor:</strong> Anda dapat mengedit data administrasi transaksi, melakukan reversal pembatalan poin, dan memberikan bonus poin manual hingga maksimal 50 poin.
+            <strong>Hak Akses Supervisor:</strong> Anda dapat menyetujui (approve) atau menolak transaksi resepsionis, mengedit data administrasi transaksi, melakukan reversal poin, dan memberikan bonus poin manual hingga maksimal 50 poin.
           </span>
         </div>
       )}
 
+      {/* Pending Transactions Alert Banner */}
+      {pendingCount > 0 && (
+        <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-300/40 flex items-center justify-center text-amber-700 shrink-0">
+              <Clock className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="text-xs font-black flex items-center gap-2">
+                <span>{pendingCount} Transaksi Menunggu Approval SPV / Admin!</span>
+                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">
+                  Perlu Verifikasi
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800/90 mt-0.5">
+                Transaksi yang diinput oleh staf Front Desk/Resepsionis ditahan sementara sampai disetujui agar poin resmi masuk ke akun tamu.
+              </p>
+            </div>
+          </div>
+          {statusFilter !== 'pending' && (
+            <button
+              type="button"
+              onClick={() => setStatusFilter('pending')}
+              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition shrink-0 flex items-center justify-center gap-1.5"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Filter Pending ({pendingCount})</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Filter & Search Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
+      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+        <div className="relative w-full md:w-80">
           <input
             type="text"
             value={search}
@@ -400,23 +501,37 @@ export const AdminTransactions = () => {
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-          <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Kategori:</span>
-          <Select
-            className="w-48"
-            size="sm"
-            options={categoryFilterOptions}
-            value={categoryFilter}
-            onChange={(opt) => setCategoryFilter(opt.value)}
-            isSearchable={false}
-          />
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Status:</span>
+            <Select
+              className="w-44"
+              size="sm"
+              options={statusFilterOptions}
+              value={statusFilter}
+              onChange={(opt) => setStatusFilter(opt.value)}
+              isSearchable={false}
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Kategori:</span>
+            <Select
+              className="w-44"
+              size="sm"
+              options={categoryFilterOptions}
+              value={categoryFilter}
+              onChange={(opt) => setCategoryFilter(opt.value)}
+              isSearchable={false}
+            />
+          </div>
         </div>
       </div>
 
       {/* Transactions Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[850px] text-left text-xs">
+          <table className="w-full min-w-[950px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-100 whitespace-nowrap">
               <tr>
                 <th className="py-3 px-4">No. Invoice</th>
@@ -424,6 +539,7 @@ export const AdminTransactions = () => {
                 <th className="py-3 px-4">Kategori</th>
                 <th className="py-3 px-4">Total Belanja (IDR)</th>
                 <th className="py-3 px-4">Poin Diperoleh</th>
+                <th className="py-3 px-4">Status Approval</th>
                 <th className="py-3 px-4">Tanggal Transaksi</th>
                 <th className="py-3 px-4 text-right">Aksi</th>
               </tr>
@@ -431,13 +547,13 @@ export const AdminTransactions = () => {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="py-6">
-                    <TableSkeleton rows={5} cols={7} />
+                  <td colSpan="8" className="py-6">
+                    <TableSkeleton rows={5} cols={8} />
                   </td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="py-8">
+                  <td colSpan="8" className="py-8">
                     <EmptyState
                       icon={Receipt}
                       title="Tidak Ada Transaksi"
@@ -467,10 +583,61 @@ export const AdminTransactions = () => {
                       Rp {Number(t.amount).toLocaleString('id-ID')}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg">
-                        <Coins className="w-3.5 h-3.5" />
-                        +{t.points_earned} pts
-                      </span>
+                      {t.status === 'pending' ? (
+                        <span className="inline-flex items-center gap-1 font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-lg text-xs">
+                          <Coins className="w-3.5 h-3.5 text-amber-500" />
+                          +{t.points_earned} pts (Tertunda)
+                        </span>
+                      ) : t.status === 'rejected' ? (
+                        <span className="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-lg text-xs line-through">
+                          <Coins className="w-3.5 h-3.5 text-rose-400" />
+                          +{t.points_earned} pts
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg text-xs">
+                          <Coins className="w-3.5 h-3.5" />
+                          +{t.points_earned} pts
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {t.status === 'pending' ? (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
+                            <Clock className="w-3 h-3 text-amber-600 animate-pulse" />
+                            Menunggu Approval
+                          </span>
+                          {t.creator_name && (
+                            <div className="text-[10px] text-slate-400">
+                              Oleh: <span className="font-semibold text-slate-600">{t.creator_name}</span> ({t.creator_role || 'staf'})
+                            </div>
+                          )}
+                        </div>
+                      ) : t.status === 'rejected' ? (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                            <XCircle className="w-3 h-3 text-rose-600" />
+                            Ditolak
+                          </span>
+                          {t.rejection_reason && (
+                            <div className="text-[10px] text-rose-500 max-w-[150px] truncate" title={t.rejection_reason}>
+                              {t.rejection_reason}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Disetujui
+                          </span>
+                          {t.approver_name && (
+                            <div className="text-[10px] text-slate-400">
+                              Acc: <span className="font-semibold text-slate-600">{t.approver_name}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
                       {new Date(t.transaction_date).toLocaleDateString('id-ID', {
@@ -480,31 +647,68 @@ export const AdminTransactions = () => {
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       {/* Actions according to matrix:
                           Receptionist: Cannot edit, cannot reversal
-                          Supervisor: Limited edit, reversal allowed
-                          Admin: Full edit, reversal allowed */}
+                          Supervisor: Can approve/reject, edit, reversal
+                          Admin: Full rights */}
                       {isSuperAdmin || isSupervisor ? (
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(t)}
-                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                            title={isSupervisor ? 'Edit Data Transaksi (Terbatas)' : 'Edit Transaksi'}
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenReversal(t)}
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition"
-                            title="Batalkan / Reversal Poin"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {t.status === 'pending' ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenApprove(t)}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                                title="Setujui Transaksi & Berikan Poin"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Setujui</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenReject(t)}
+                                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                                title="Tolak Transaksi"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                <span>Tolak</span>
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEdit(t)}
+                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                title={isSupervisor ? 'Edit Data Transaksi (Terbatas)' : 'Edit Transaksi'}
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenReversal(t)}
+                                className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition"
+                                title="Batalkan / Reversal Poin"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       ) : (
-                        <span className="text-[10px] text-slate-400 font-medium italic">
-                          Tercatat
-                        </span>
+                        <div>
+                          {t.status === 'pending' ? (
+                            <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                              Menunggu Review SPV
+                            </span>
+                          ) : t.status === 'rejected' ? (
+                            <span className="text-[10px] text-rose-600 font-semibold bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                              Ditolak
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                              Poin Aktif
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -620,6 +824,16 @@ export const AdminTransactions = () => {
             />
           </div>
 
+          {/* Receptionist Notice */}
+          {isReceptionist && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+              <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-[11px] leading-relaxed">
+                <strong>Catatan Resepsionis:</strong> Transaksi ini akan tersimpan dengan status <strong>Menunggu Approval</strong>. Poin (+{calculatedPoints} pts) baru akan aktif di akun tamu setelah disetujui oleh Supervisor atau Admin.
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Catatan Tambahan</label>
             <textarea
@@ -644,7 +858,11 @@ export const AdminTransactions = () => {
               disabled={submitting}
               className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-sm shadow-red-200 transition disabled:opacity-50"
             >
-              {submitting ? 'Menyimpan...' : 'Simpan & Tambah Poin'}
+              {submitting
+                ? 'Menyimpan...'
+                : isReceptionist
+                ? 'Ajukan Transaksi (Menunggu Approval)'
+                : 'Simpan & Tambah Poin'}
             </button>
           </div>
         </form>
@@ -886,6 +1104,129 @@ export const AdminTransactions = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal Setujui / Approve Transaksi */}
+      <Modal
+        isOpen={approveModalOpen}
+        onClose={() => setApproveModalOpen(false)}
+        title="Setujui Transaksi & Berikan Poin"
+        subtitle="Verifikasi transaksi resepsionis agar poin resmi masuk ke saldo member"
+        maxWidth="max-w-md"
+      >
+        {selectedTx && (
+          <div className="space-y-4">
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-2">
+              <div className="flex items-center gap-2 font-bold text-emerald-800">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Persetujuan Transaksi
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                Menyetujui transaksi ini akan langsung menambahkan saldo sebanyak{' '}
+                <strong>+{selectedTx.points_earned} Poin</strong> ke akun tamu <strong>{selectedTx.member_name}</strong>.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Invoice:</span>
+                <span className="font-mono font-bold text-slate-800">{selectedTx.invoice_no}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Tamu:</span>
+                <span className="font-bold text-slate-800">{selectedTx.member_name} ({selectedTx.member_code})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Nominal Belanja:</span>
+                <span className="font-bold text-slate-800">Rp {Number(selectedTx.amount).toLocaleString('id-ID')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Poin Diberikan:</span>
+                <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  +{selectedTx.points_earned} pts
+                </span>
+              </div>
+              {selectedTx.creator_name && (
+                <div className="flex justify-between pt-1 border-t border-slate-200/60">
+                  <span className="text-slate-500">Diinput Oleh:</span>
+                  <span className="font-semibold text-slate-700">{selectedTx.creator_name} ({selectedTx.creator_role || 'Resepsionis'})</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setApproveModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleApproveSubmit}
+                disabled={submitting}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition disabled:opacity-50"
+              >
+                {submitting ? 'Memproses...' : 'Ya, Setujui & Tambah Poin'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal Tolak / Reject Transaksi */}
+      <Modal
+        isOpen={rejectModalOpen}
+        onClose={() => setRejectModalOpen(false)}
+        title="Tolak Transaksi"
+        subtitle="Transaksi yang ditolak tidak akan memberikan poin kepada tamu"
+        maxWidth="max-w-md"
+      >
+        {selectedTx && (
+          <form onSubmit={handleRejectSubmit} className="space-y-4">
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-1">
+              <div className="flex items-center gap-2 font-bold text-rose-800">
+                <AlertTriangle className="w-4 h-4 text-rose-600" />
+                Konfirmasi Penolakan Transaksi
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                Transaksi <strong>{selectedTx.invoice_no}</strong> sebesar Rp {Number(selectedTx.amount).toLocaleString('id-ID')} akan ditolak dan poin tidak akan masuk.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Alasan Penolakan *
+              </label>
+              <textarea
+                rows={3}
+                required
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Contoh: Bukti invoice tidak valid / Transaksi dibatalkan tamu"
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-medium"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setRejectModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm transition disabled:opacity-50"
+              >
+                {submitting ? 'Menolak...' : 'Tolak Transaksi'}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
   );

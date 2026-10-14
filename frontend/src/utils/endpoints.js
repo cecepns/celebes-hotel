@@ -51,8 +51,11 @@ export const API_ENDPOINTS = {
     TRANSACTIONS: {
       LIST: '/admin/transactions',
       CREATE: '/admin/transactions',
+      DETAIL: (id) => `/admin/transactions/${id}`,
       UPDATE: (id) => `/admin/transactions/${id}`,
       DELETE: (id) => `/admin/transactions/${id}`,
+      APPROVE: (id) => `/admin/transactions/${id}/approve`,
+      REJECT: (id) => `/admin/transactions/${id}/reject`,
       MANUAL_BONUS: '/admin/transactions/manual-bonus',
       EXPORT: '/admin/transactions/export',
     },

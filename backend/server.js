@@ -121,6 +121,26 @@ const initSchemaUpdates = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_closed_dates (start_date, end_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+    // 5. transactions columns for approval workflow
+    const [tCols] = await pool.query('SHOW COLUMNS FROM transactions');
+    const tExisting = tCols.map(c => c.Field.toLowerCase());
+    if (!tExisting.includes('status')) {
+      await pool.query("ALTER TABLE transactions ADD COLUMN status ENUM('pending', 'approved', 'rejected') DEFAULT 'approved' AFTER points_earned");
+      console.log('✅ Added status to transactions');
+    }
+    if (!tExisting.includes('approved_by')) {
+      await pool.query('ALTER TABLE transactions ADD COLUMN approved_by INT NULL AFTER created_by');
+      console.log('✅ Added approved_by to transactions');
+    }
+    if (!tExisting.includes('approved_at')) {
+      await pool.query('ALTER TABLE transactions ADD COLUMN approved_at DATETIME NULL AFTER approved_by');
+      console.log('✅ Added approved_at to transactions');
+    }
+    if (!tExisting.includes('rejection_reason')) {
+      await pool.query('ALTER TABLE transactions ADD COLUMN rejection_reason VARCHAR(255) NULL AFTER approved_at');
+      console.log('✅ Added rejection_reason to transactions');
+    }
   } catch (err) {
     console.warn('DB schema check:', err.message);
   }
@@ -1625,7 +1645,7 @@ app.delete('/api/admin/users/:id', verifySuperAdmin, async (req, res) => {
 // Admin Transactions List
 app.get('/api/admin/transactions', verifyAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '', category = '', sort_by = 'transaction_date', order = 'DESC' } = req.query;
+    const { page = 1, limit = 10, search = '', category = '', status = '', sort_by = 'transaction_date', order = 'DESC' } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let whereClause = 'WHERE 1=1';
@@ -1634,6 +1654,11 @@ app.get('/api/admin/transactions', verifyAdmin, async (req, res) => {
     if (category && category !== 'all') {
       whereClause += ' AND t.category = ?';
       params.push(category);
+    }
+
+    if (status && status !== 'all') {
+      whereClause += ' AND t.status = ?';
+      params.push(status);
     }
 
     if (search.trim()) {
@@ -1650,17 +1675,29 @@ app.get('/api/admin/transactions', verifyAdmin, async (req, res) => {
     );
     const total = countRows[0].total;
 
+    // Get count of pending transactions for badge/alert
+    const [pendingRows] = await pool.query(
+      `SELECT COUNT(*) as total_pending FROM transactions WHERE status = 'pending'`
+    );
+    const pendingCount = pendingRows[0]?.total_pending || 0;
+
     const [rows] = await pool.query(
-      `SELECT t.*, u.name as member_name, u.phone as member_phone, u.member_code 
+      `SELECT t.*, u.name as member_name, u.phone as member_phone, u.member_code,
+              creator.name as creator_name, creator.role as creator_role,
+              approver.name as approver_name, approver.role as approver_role
        FROM transactions t 
        JOIN users u ON t.user_id = u.id 
+       LEFT JOIN users creator ON t.created_by = creator.id
+       LEFT JOIN users approver ON t.approved_by = approver.id
        ${whereClause} 
        ORDER BY t.${sort_by} ${sortOrder}, t.id DESC 
        LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), parseInt(offset)]
     );
 
-    res.json(formatPaginatedResponse(rows, page, limit, total));
+    const resp = formatPaginatedResponse(rows, page, limit, total);
+    resp.pending_count = pendingCount;
+    res.json(resp);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -1672,6 +1709,7 @@ app.get('/api/admin/transactions/export', verifyAdmin, async (req, res) => {
     const [rows] = await pool.query(
       `SELECT t.invoice_no AS 'No Invoice', u.name AS 'Nama Tamu', u.member_code AS 'Kode Member',
               t.category AS 'Kategori', t.amount AS 'Total Transaksi (IDR)', t.points_earned AS 'Poin Diperoleh',
+              t.status AS 'Status Approval',
               DATE_FORMAT(t.transaction_date, '%d-%m-%Y') AS 'Tanggal Transaksi', t.notes AS 'Catatan'
        FROM transactions t
        JOIN users u ON t.user_id = u.id
@@ -1684,6 +1722,8 @@ app.get('/api/admin/transactions/export', verifyAdmin, async (req, res) => {
 });
 
 // Admin Record Transaction (Automatic FIFO Point Calculation based on settings: Rp 50.000 = 5 pts or Rp 10.000 = 1 pt)
+// Role Receptionist: status = 'pending' (menunggu approval SPV / Admin)
+// Role Admin / SPV: status = 'approved' (langsung aktif)
 app.post('/api/admin/transactions', verifyAdmin, async (req, res) => {
   const connection = await pool.getConnection();
   try {
@@ -1717,14 +1757,21 @@ app.post('/api/admin/transactions', verifyAdmin, async (req, res) => {
     const invNo = invoice_no ? invoice_no.trim() : `INV-${Date.now()}`;
     const transDate = transaction_date || new Date().toISOString().slice(0, 10);
 
+    // Approval requirement check: If input from Receptionist / Cashier / Staff, set status = 'pending'
+    const isApprovalRequired = ['resepsionis', 'kasir', 'staff'].includes(req.user.role);
+    const initialStatus = isApprovalRequired ? 'pending' : 'approved';
+    const approvedBy = isApprovalRequired ? null : req.user.id;
+    const approvedAt = isApprovalRequired ? null : new Date();
+
     const [transResult] = await connection.query(
-      'INSERT INTO transactions (user_id, invoice_no, category, amount, points_earned, transaction_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [user_id, invNo, category, numAmount, earnedPoints, transDate, notes || null, req.user.id]
+      'INSERT INTO transactions (user_id, invoice_no, category, amount, points_earned, status, transaction_date, notes, created_by, approved_by, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [user_id, invNo, category, numAmount, earnedPoints, initialStatus, transDate, notes || null, req.user.id, approvedBy, approvedAt]
     );
 
     const transactionId = transResult.insertId;
 
-    if (earnedPoints > 0) {
+    // Only award points to member IF approved!
+    if (!isApprovalRequired && earnedPoints > 0) {
       const earnedDate = new Date(transDate);
       const expiryDate = new Date(transDate);
       expiryDate.setDate(expiryDate.getDate() + expiryDays);
@@ -1740,16 +1787,128 @@ app.post('/api/admin/transactions', verifyAdmin, async (req, res) => {
 
     await connection.commit();
 
+    const returnMsg = isApprovalRequired
+      ? `Transaksi berhasil dicatat dengan status Pending! Menunggu approval dari Supervisor / Admin sebelum poin (+${earnedPoints} pts) aktif ke member.`
+      : `Transaksi berhasil disimpan! Poin yang diperoleh: +${earnedPoints} poin langsung aktif.`;
+
     res.status(201).json({
       success: true,
-      message: `Transaksi berhasil disimpan! Poin yang diperoleh: +${earnedPoints} poin.`,
+      message: returnMsg,
       data: {
         id: transactionId,
         invoice_no: invNo,
         amount: numAmount,
         points_earned: earnedPoints,
+        status: initialStatus,
         leftover_amount: numAmount % unitAmount
       }
+    });
+  } catch (err) {
+    await connection.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// Admin / Supervisor Approve Transaction
+app.put('/api/admin/transactions/:id/approve', verifySupervisorOrAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+
+    const [transRows] = await connection.query('SELECT * FROM transactions WHERE id = ? FOR UPDATE', [id]);
+    if (transRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
+    }
+
+    const trans = transRows[0];
+    if (trans.status === 'approved') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: 'Transaksi ini sudah disetujui sebelumnya' });
+    }
+
+    // Load settings for expiry
+    const [settingRows] = await connection.query('SELECT setting_key, setting_value FROM settings');
+    const settings = {};
+    settingRows.forEach(r => { settings[r.setting_key] = r.setting_value; });
+    const expiryDays = parseInt(settings.point_expiry_days) || 365;
+
+    // Update status to approved
+    await connection.query(
+      'UPDATE transactions SET status = "approved", approved_by = ?, approved_at = NOW(), rejection_reason = NULL WHERE id = ?',
+      [req.user.id, id]
+    );
+
+    // Award points to point_ledger & users
+    if (trans.points_earned > 0) {
+      const earnedDate = new Date(trans.transaction_date);
+      const expiryDate = new Date(trans.transaction_date);
+      expiryDate.setDate(expiryDate.getDate() + expiryDays);
+
+      await connection.query(
+        'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, ?, ?, ?, ?, ?, 0, "transaction", ?)',
+        [trans.user_id, id, trans.points_earned, trans.points_earned, earnedDate, expiryDate, `Transaksi ${trans.category.toUpperCase()} (${trans.invoice_no})`]
+      );
+
+      await connection.query('UPDATE users SET total_points = total_points + ? WHERE id = ?', [trans.points_earned, trans.user_id]);
+    }
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: `Transaksi #${trans.invoice_no} berhasil disetujui! +${trans.points_earned} poin telah masuk ke member.`,
+      data: { id, status: 'approved', points_earned: trans.points_earned }
+    });
+  } catch (err) {
+    await connection.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// Admin / Supervisor Reject Transaction
+app.put('/api/admin/transactions/:id/reject', verifySupervisorOrAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+    const { reason = 'Ditolak oleh Supervisor/Admin' } = req.body;
+
+    const [transRows] = await connection.query('SELECT * FROM transactions WHERE id = ? FOR UPDATE', [id]);
+    if (transRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
+    }
+
+    const trans = transRows[0];
+
+    // If it was previously approved, we need to reverse points
+    if (trans.status === 'approved' && trans.points_earned > 0) {
+      await connection.query('DELETE FROM point_ledger WHERE transaction_id = ? AND user_id = ?', [id, trans.user_id]);
+      const [sumRes] = await connection.query(
+        'SELECT COALESCE(SUM(points_remaining), 0) AS total FROM point_ledger WHERE user_id = ? AND is_expired = 0',
+        [trans.user_id]
+      );
+      const newTotal = parseInt(sumRes[0].total) || 0;
+      await connection.query('UPDATE users SET total_points = ? WHERE id = ?', [newTotal, trans.user_id]);
+    }
+
+    await connection.query(
+      'UPDATE transactions SET status = "rejected", approved_by = ?, approved_at = NOW(), rejection_reason = ? WHERE id = ?',
+      [req.user.id, reason.trim(), id]
+    );
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: `Transaksi #${trans.invoice_no} telah ditolak. Poin tidak diberikan ke member.`,
+      data: { id, status: 'rejected' }
     });
   } catch (err) {
     await connection.rollback();
