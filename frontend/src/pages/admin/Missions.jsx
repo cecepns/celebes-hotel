@@ -446,10 +446,17 @@ export const AdminMissions = () => {
                           )}
                         </td>
                         <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
-                          {new Date(c.created_at || c.claimed_at).toLocaleDateString('id-ID', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short',
-                          })}
+                          {(() => {
+                            const dateVal = c.created_at || c.claimed_at || c.awarded_at;
+                            if (!dateVal) return '-';
+                            const d = new Date(dateVal);
+                            return isNaN(d.getTime())
+                              ? String(dateVal).slice(0, 16)
+                              : d.toLocaleString('id-ID', {
+                                  dateStyle: 'medium',
+                                  timeStyle: 'short',
+                                });
+                          })()}
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
                           {c.status === 'pending' && (
