@@ -30,6 +30,13 @@ export const API_ENDPOINTS = {
     TRANSACTIONS: '/member/transactions',
     RESERVATIONS: '/member/reservations',
     RESERVATION_ITEM: (id) => `/member/reservations/${id}`,
+    UPLOAD_PAYMENT_PROOF: (id) => `/member/reservations/${id}/payment-proof`,
+    NOTIFICATIONS: {
+      LIST: '/member/notifications',
+      UNREAD_COUNT: '/member/notifications/unread-count',
+      MARK_READ: (id) => `/member/notifications/${id}/read`,
+      MARK_ALL_READ: '/member/notifications/read-all',
+    },
   },
   ADMIN: {
     DASHBOARD: '/admin/dashboard',
@@ -57,6 +64,7 @@ export const API_ENDPOINTS = {
       APPROVE: (id) => `/admin/transactions/${id}/approve`,
       REJECT: (id) => `/admin/transactions/${id}/reject`,
       MANUAL_BONUS: '/admin/transactions/manual-bonus',
+      ADJUST_POINTS: '/admin/transactions/adjust-points',
       EXPORT: '/admin/transactions/export',
     },
     REWARDS: {
@@ -64,6 +72,7 @@ export const API_ENDPOINTS = {
       CREATE: '/admin/rewards',
       UPDATE: (id) => `/admin/rewards/${id}`,
       DELETE: (id) => `/admin/rewards/${id}`,
+      EXPORT: '/admin/rewards/export',
     },
     MISSIONS: {
       LIST: '/admin/missions',
@@ -73,6 +82,7 @@ export const API_ENDPOINTS = {
       CLAIMS: '/admin/mission-claims',
       APPROVE_CLAIM: (id) => `/admin/mission-claims/${id}/approve`,
       REJECT_CLAIM: (id) => `/admin/mission-claims/${id}/reject`,
+      EXPORT: '/admin/missions/export',
     },
     VOUCHERS: {
       LIST: '/admin/vouchers',
@@ -84,6 +94,7 @@ export const API_ENDPOINTS = {
       LIST: '/admin/reservations',
       UPDATE: (id) => `/admin/reservations/${id}`,
       DELETE: (id) => `/admin/reservations/${id}`,
+      VERIFY_PAYMENT: (id) => `/admin/reservations/${id}/verify-payment`,
     },
     CLOSED_DATES: {
       LIST: '/admin/closed-dates',

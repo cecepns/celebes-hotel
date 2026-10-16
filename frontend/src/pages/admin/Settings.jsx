@@ -14,6 +14,8 @@ import {
   CalendarX,
   Sparkles,
   CreditCard,
+  Calendar,
+  Moon,
 } from 'lucide-react';
 import { Select } from '@/components/common/Select';
 import { Link } from 'react-router-dom';
@@ -36,6 +38,9 @@ export const AdminSettings = () => {
     payment_bank_name: 'Bank BCA',
     payment_bank_account: '123-456-7890',
     payment_account_name: 'Hotel Celebes Hasanuddin',
+    ramadan_start_date: '2026-02-18',
+    ramadan_end_date: '2026-03-20',
+    new_year_date: '2026-12-31',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -293,6 +298,78 @@ export const AdminSettings = () => {
                 Tamu mengisi formulir reservasi di web/apk HCH, langsung otomatis terhubung ke WhatsApp resepsionis untuk konfirmasi & pelunasan cashless.
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* Card: Jadwal Musiman (Ramadhan & Malam Tahun Baru) */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                <Moon className="w-4 h-4 text-amber-500" />
+                Jadwal Kalender Musiman (Ramadhan & Malam Tahun Baru)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Tanggal acuan otomatis untuk kalkulasi harga kamar khusus yang diset di menu Data Kamar.
+              </p>
+            </div>
+            <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-md self-start sm:self-auto">
+              🌙 Auto Seasonal Pricing
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                Tanggal Mulai Ramadhan
+              </label>
+              <input
+                type="date"
+                value={settings.ramadan_start_date || ''}
+                onChange={(e) => setSettings({ ...settings, ramadan_start_date: e.target.value })}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-medium"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Awal puasa 1 Ramadhan (cth: 2026-02-18)
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                Tanggal Akhir Ramadhan
+              </label>
+              <input
+                type="date"
+                value={settings.ramadan_end_date || ''}
+                onChange={(e) => setSettings({ ...settings, ramadan_end_date: e.target.value })}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-medium"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Akhir puasa / Idul Fitri (cth: 2026-03-20)
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                Tanggal Malam Tahun Baru
+              </label>
+              <input
+                type="date"
+                value={settings.new_year_date || ''}
+                onChange={(e) => setSettings({ ...settings, new_year_date: e.target.value })}
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 font-medium"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Malam pergantian tahun (cth: 2026-12-31)
+              </p>
+            </div>
+          </div>
+
+          <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-xs text-amber-900 leading-relaxed">
+            💡 <strong>Cara Kerja:</strong> Jika tamu memesan kamar dengan tanggal menginap yang berada dalam rentang Ramadhan atau tepat malam tahun baru, sistem reservasi hotel secara otomatis menghitung tarif khusus per malam sesuai nilai yang ditentukan di masing-masing kamar pada menu <strong>Data Kelola Kamar</strong>.
           </div>
         </div>
 

@@ -24,7 +24,12 @@ import {
   Clock,
   MessageCircle,
   LogIn,
+  Upload,
+  Eye,
+  Moon,
+  Image as ImageIcon,
 } from 'lucide-react';
+import { api } from '@/utils/api';
 import { Select } from '@/components/common/Select';
 import { Skeleton } from '@/components/common/Skeleton';
 import { Modal } from '@/components/common/Modal';
@@ -46,6 +51,92 @@ const formatDateID = (dateStr) => {
     return `${day} ${monthName} ${year}`;
   }
   return clean;
+};
+
+// Helper Media URL
+const getMediaUrl = (url) => {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  const base = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '');
+  return `${base}${url}`;
+};
+
+// Helper: Calculate seasonal pricing matching backend rules
+const calculateSeasonalPricing = (roomObj, checkIn, checkOut, numRooms = 1, discountPct = 0, settings = {}) => {
+  if (!roomObj || !checkIn || !checkOut) {
+    return {
+      nights: 1,
+      normalNights: 1,
+      ramadanNights: 0,
+      newYearNights: 0,
+      normalPrice: 350000,
+      ramadanPrice: 350000,
+      newYearPrice: 350000,
+      baseSubtotal: 350000,
+      discountAmount: 0,
+      finalTotalPrice: 350000,
+    };
+  }
+
+  const normalPrice = parseFloat(roomObj.price) || 350000;
+  const ramadanPrice = roomObj.price_ramadan !== null && roomObj.price_ramadan !== undefined && roomObj.price_ramadan !== ''
+    ? parseFloat(roomObj.price_ramadan)
+    : normalPrice;
+  const newYearPrice = roomObj.price_new_year !== null && roomObj.price_new_year !== undefined && roomObj.price_new_year !== ''
+    ? parseFloat(roomObj.price_new_year)
+    : normalPrice;
+
+  const ramadanStart = settings?.ramadan_start_date ? String(settings.ramadan_start_date).split('T')[0] : null;
+  const ramadanEnd = settings?.ramadan_end_date ? String(settings.ramadan_end_date).split('T')[0] : null;
+  const newYearDate = settings?.new_year_date ? String(settings.new_year_date).split('T')[0] : '12-31';
+
+  let current = new Date(checkIn);
+  const end = new Date(checkOut);
+  let nights = 0;
+  let baseTotalPerRoom = 0;
+  let ramadanNights = 0;
+  let newYearNights = 0;
+  let normalNights = 0;
+
+  while (current < end) {
+    nights++;
+    const yyyy = current.getFullYear();
+    const mm = String(current.getMonth() + 1).padStart(2, '0');
+    const dd = String(current.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    const monthDay = `${mm}-${dd}`;
+
+    if (monthDay === '12-31' || dateStr === newYearDate) {
+      baseTotalPerRoom += newYearPrice;
+      newYearNights++;
+    } else if (ramadanStart && ramadanEnd && dateStr >= ramadanStart && dateStr <= ramadanEnd) {
+      baseTotalPerRoom += ramadanPrice;
+      ramadanNights++;
+    } else {
+      baseTotalPerRoom += normalPrice;
+      normalNights++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  nights = Math.max(1, nights);
+  if (baseTotalPerRoom === 0) baseTotalPerRoom = normalPrice * nights;
+  const baseSubtotal = baseTotalPerRoom * (parseInt(numRooms) || 1);
+  const discountAmount = Math.round(baseSubtotal * ((discountPct || 0) / 100));
+  const finalTotalPrice = Math.max(0, baseSubtotal - discountAmount);
+
+  return {
+    nights,
+    normalNights,
+    ramadanNights,
+    newYearNights,
+    normalPrice,
+    ramadanPrice,
+    newYearPrice,
+    baseSubtotal,
+    discountAmount,
+    finalTotalPrice,
+  };
 };
 
 export const Reservation = () => {
@@ -95,6 +186,15 @@ export const Reservation = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reservationToDelete, setReservationToDelete] = useState(null);
   const [deletingLoading, setDeletingLoading] = useState(false);
+
+  // Payment Proof Modal State
+  const [uploadProofModalOpen, setUploadProofModalOpen] = useState(false);
+  const [selectedReservationForProof, setSelectedReservationForProof] = useState(null);
+  const [proofFile, setProofFile] = useState(null);
+  const [proofPreview, setProofPreview] = useState(null);
+  const [uploadingProof, setUploadingProof] = useState(false);
+  const [previewProofModalOpen, setPreviewProofModalOpen] = useState(false);
+  const [previewProofUrl, setPreviewProofUrl] = useState(null);
 
   // Keep guest_name and guest_phone locked to user profile if authenticated
   useEffect(() => {
@@ -190,25 +290,88 @@ export const Reservation = () => {
 
   const conflictDate = checkDateConflict();
 
-  // Price Calculation for New Booking
+  // Price Calculation for New Booking (with Ramadan & New Year Rates)
   const selectedRoomObj = rooms.find((r) => r.name === formData.room_type) || rooms[0];
-  const roomPrice = selectedRoomObj ? parseFloat(selectedRoomObj.price) : 350000;
-  const d1 = new Date(formData.check_in);
-  const d2 = new Date(formData.check_out);
-  const nights = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
-  const baseSubtotal = roomPrice * nights * (parseInt(formData.num_rooms) || 1);
-  const discountAmount = Math.round(baseSubtotal * (discountPercent / 100));
-  const finalTotalPrice = Math.max(0, baseSubtotal - discountAmount);
+  const newBookingPricing = calculateSeasonalPricing(
+    selectedRoomObj,
+    formData.check_in,
+    formData.check_out,
+    formData.num_rooms,
+    discountPercent,
+    hotelSettings
+  );
+  const nights = newBookingPricing.nights;
+  const baseSubtotal = newBookingPricing.baseSubtotal;
+  const discountAmount = newBookingPricing.discountAmount;
+  const finalTotalPrice = newBookingPricing.finalTotalPrice;
 
-  // Price Calculation for Edit Modal
+  // Price Calculation for Edit Modal (with Ramadan & New Year Rates)
   const editSelectedRoomObj = rooms.find((r) => r.name === editForm.room_type) || rooms[0];
-  const editRoomPrice = editSelectedRoomObj ? parseFloat(editSelectedRoomObj.price) : 350000;
-  const editD1 = new Date(editForm.check_in);
-  const editD2 = new Date(editForm.check_out);
-  const editNights = Math.max(1, Math.round((editD2 - editD1) / (1000 * 60 * 60 * 24)));
-  const editBaseSubtotal = editRoomPrice * editNights * (parseInt(editForm.num_rooms) || 1);
-  const editDiscountAmount = Math.round(editBaseSubtotal * (discountPercent / 100));
-  const editFinalPrice = Math.max(0, editBaseSubtotal - editDiscountAmount);
+  const editBookingPricing = calculateSeasonalPricing(
+    editSelectedRoomObj,
+    editForm.check_in,
+    editForm.check_out,
+    editForm.num_rooms,
+    discountPercent,
+    hotelSettings
+  );
+  const editNights = editBookingPricing.nights;
+  const editBaseSubtotal = editBookingPricing.baseSubtotal;
+  const editDiscountAmount = editBookingPricing.discountAmount;
+  const editFinalPrice = editBookingPricing.finalTotalPrice;
+
+  // Payment Proof Handlers
+  const handleOpenUploadProof = (r) => {
+    setSelectedReservationForProof(r);
+    setProofFile(null);
+    setProofPreview(null);
+    setUploadProofModalOpen(true);
+  };
+
+  const handleProofFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setProofFile(file);
+      setProofPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleSubmitProof = async (e) => {
+    e.preventDefault();
+    if (!selectedReservationForProof || !proofFile) {
+      toast.error('Silakan pilih file foto/gambar bukti transfer bank');
+      return;
+    }
+
+    try {
+      setUploadingProof(true);
+      const data = new FormData();
+      data.append('payment_proof', proofFile);
+
+      const res = await api.post(
+        API_ENDPOINTS.MEMBER.UPLOAD_PAYMENT_PROOF(selectedReservationForProof.id),
+        data,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Bukti transfer berhasil diunggah!');
+        setUploadProofModalOpen(false);
+        fetchMyReservations();
+      } else {
+        toast.error(res.data?.message || 'Gagal mengunggah bukti transfer');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Gagal mengunggah bukti transfer');
+    } finally {
+      setUploadingProof(false);
+    }
+  };
+
+  const handleOpenProofPreview = (proofUrl) => {
+    setPreviewProofUrl(getMediaUrl(proofUrl));
+    setPreviewProofModalOpen(true);
+  };
 
   // Check if edit dates hit closed dates
   const checkEditDateConflict = () => {
@@ -570,6 +733,21 @@ export const Reservation = () => {
                             ))}
                           </div>
                         )}
+
+                        {(room.price_ramadan || room.price_new_year) && (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-slate-100">
+                            {room.price_ramadan && (
+                              <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1">
+                                🌙 Ramadhan: Rp {Number(room.price_ramadan).toLocaleString('id-ID')}
+                              </span>
+                            )}
+                            {room.price_new_year && (
+                              <span className="text-[10px] bg-purple-50 text-purple-800 border border-purple-200/80 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1">
+                                🎉 Thn Baru: Rp {Number(room.price_new_year).toLocaleString('id-ID')}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -726,8 +904,35 @@ export const Reservation = () => {
                   <span className="text-[10px] text-slate-500 font-normal">{nights} Malam • {formData.num_rooms} Kamar</span>
                 </div>
 
+                {/* Seasonal Rates Breakdown if applicable */}
+                {(newBookingPricing.ramadanNights > 0 || newBookingPricing.newYearNights > 0) && (
+                  <div className="p-2.5 rounded-lg bg-amber-50/80 border border-amber-200 text-[11px] space-y-1.5 text-slate-700">
+                    <p className="font-bold text-amber-900 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" /> Rincian Tarif Berdasarkan Musim:
+                    </p>
+                    {newBookingPricing.normalNights > 0 && (
+                      <div className="flex justify-between text-slate-600">
+                        <span>• {newBookingPricing.normalNights} Malam Reguler (@ Rp {Number(newBookingPricing.normalPrice).toLocaleString('id-ID')})</span>
+                        <span>Rp {Number(newBookingPricing.normalPrice * newBookingPricing.normalNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+                    {newBookingPricing.ramadanNights > 0 && (
+                      <div className="flex justify-between text-amber-900 font-medium">
+                        <span>• 🌙 {newBookingPricing.ramadanNights} Malam Ramadhan (@ Rp {Number(newBookingPricing.ramadanPrice).toLocaleString('id-ID')})</span>
+                        <span>Rp {Number(newBookingPricing.ramadanPrice * newBookingPricing.ramadanNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+                    {newBookingPricing.newYearNights > 0 && (
+                      <div className="flex justify-between text-purple-900 font-medium">
+                        <span>• 🎉 {newBookingPricing.newYearNights} Malam Tahun Baru (@ Rp {Number(newBookingPricing.newYearPrice).toLocaleString('id-ID')})</span>
+                        <span>Rp {Number(newBookingPricing.newYearPrice * newBookingPricing.newYearNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between text-slate-600">
-                  <span>{discountPercent > 0 ? 'Harga Normal:' : 'Total Biaya Kamar:'}</span>
+                  <span>{discountPercent > 0 ? 'Harga Kamar:' : 'Total Biaya Kamar:'}</span>
                   <span>Rp {Number(baseSubtotal).toLocaleString('id-ID')}</span>
                 </div>
 
@@ -746,15 +951,31 @@ export const Reservation = () => {
                 </div>
               </div>
 
-              {/* Cashless Notice */}
-              <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-start gap-2.5 text-[11px] text-emerald-900">
-                <CreditCard className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">Ketentuan Pembayaran Cashless:</p>
-                  <p className="text-emerald-800/90 leading-relaxed mt-0.5">
-                    Pemesanan melalui aplikasi HCH mewajibkan pembayaran pelunasan non-tunai (Transfer / QRIS) sebelum check-in. Resepsionis akan memberikan nomor rekening/QRIS resmi.
-                  </p>
+              {/* Rekening Transfer Bank Resmi Hotel */}
+              <div className="p-3 bg-emerald-50 border border-emerald-200/90 rounded-xl space-y-1.5 text-xs">
+                <div className="flex items-center justify-between font-bold text-emerald-950 pb-1 border-b border-emerald-200">
+                  <span className="flex items-center gap-1.5">
+                    <CreditCard className="w-4 h-4 text-emerald-600" />
+                    <span>Rekening Transfer Resmi Hotel</span>
+                  </span>
+                  <span className="text-[10px] bg-emerald-600 text-white font-semibold px-2 py-0.5 rounded-full">
+                    {hotelSettings.payment_bank_name || 'Bank BCA'}
+                  </span>
                 </div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-1">
+                  <div>
+                    <span className="text-[11px] text-emerald-800">Nomor Rekening:</span>
+                    <span className="font-mono font-black text-sm text-emerald-950 ml-1.5 select-all">
+                      {hotelSettings.payment_bank_account || '123-456-7890'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-emerald-800 font-medium">
+                    a/n {hotelSettings.payment_account_name || 'Hotel Celebes Hasanuddin'}
+                  </div>
+                </div>
+                <p className="text-[10px] text-emerald-700/80 leading-relaxed pt-1">
+                  Setelah booking dikirim, Anda dapat mengunggah bukti transfer bank di tab <strong>"Reservasi Saya"</strong> untuk verifikasi instan staf kami.
+                </p>
               </div>
 
               <button
@@ -824,22 +1045,40 @@ export const Reservation = () => {
                           </span>
                         </div>
 
-                        {/* Status Badge */}
-                        {r.status === 'confirmed' ? (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            Dikonfirmasi
-                          </span>
-                        ) : r.status === 'cancelled' ? (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold">
-                            Dibatalkan
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-amber-600" />
-                            Menunggu Konfirmasi
-                          </span>
-                        )}
+                        {/* Status Badges */}
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          {/* Payment Status Badge */}
+                          {r.payment_status === 'paid' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              Lunas
+                            </span>
+                          ) : r.payment_status === 'pending_verification' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              Verifikasi Bukti
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
+                              Belum Bayar
+                            </span>
+                          )}
+
+                          {/* Reservation Status Badge */}
+                          {r.status === 'confirmed' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">
+                              Dikonfirmasi
+                            </span>
+                          ) : r.status === 'cancelled' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold">
+                              Dibatalkan
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold">
+                              Menunggu
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Room & Dates Info */}
@@ -880,18 +1119,60 @@ export const Reservation = () => {
                             </p>
                           )}
                         </div>
+
+                        {/* Payment Proof Card if attached */}
+                        {r.payment_proof && (
+                          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0 cursor-pointer" onClick={() => handleOpenProofPreview(r.payment_proof)}>
+                                <img
+                                  src={getMediaUrl(r.payment_proof)}
+                                  alt="Bukti Transfer"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div>
+                                <span className="text-[11px] font-bold text-slate-800 block">Bukti Transfer Terlampir</span>
+                                <span className="text-[10px] text-slate-400">
+                                  {r.payment_status === 'paid' ? 'Sudah diverifikasi resepsionis' : 'Sedang diproses verifikasi'}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenProofPreview(r.payment_proof)}
+                              className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 transition flex items-center gap-1"
+                            >
+                              <Eye className="w-3 h-3 text-slate-500" />
+                              <span>Lihat</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Action Buttons: Chat WA, Edit, Delete */}
-                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => handleChatReceptionist(r)}
-                          className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 border border-emerald-200/70"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Chat WA</span>
-                        </button>
+                      {/* Action Buttons: Chat WA, Upload Proof, Edit, Delete */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleChatReceptionist(r)}
+                            className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 border border-emerald-200/70"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Chat WA</span>
+                          </button>
+
+                          {r.payment_status !== 'paid' && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenUploadProof(r)}
+                              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 border border-blue-200/70"
+                            >
+                              <Upload className="w-3.5 h-3.5 text-blue-600" />
+                              <span>{r.payment_proof ? 'Ganti Bukti' : 'Upload Bukti Bayar'}</span>
+                            </button>
+                          )}
+                        </div>
 
                         <div className="flex items-center gap-2">
                           {/* Tombol Edit */}
@@ -1058,6 +1339,107 @@ export const Reservation = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* MODAL UPLOAD BUKTI TRANSFER BANK */}
+      <Modal
+        isOpen={uploadProofModalOpen}
+        onClose={() => setUploadProofModalOpen(false)}
+        title={`Upload Bukti Transfer (#HCH-${selectedReservationForProof?.id})`}
+        subtitle="Lampirkan foto struk / resi transfer pelunasan reservasi kamar"
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleSubmitProof} className="space-y-4">
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Tipe Kamar:</span>
+              <span className="font-bold text-slate-800">{selectedReservationForProof?.room_type}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Total Biaya:</span>
+              <span className="font-black text-red-600">
+                Rp {Number(selectedReservationForProof?.total_price || 0).toLocaleString('id-ID')}
+              </span>
+            </div>
+            <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-600">
+              Transfer ke: <strong>{hotelSettings.payment_bank_name || 'Bank BCA'}</strong> • {hotelSettings.payment_bank_account || '123-456-7890'} (a/n {hotelSettings.payment_account_name || 'Hotel Celebes Hasanuddin'})
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Pilih Foto Bukti Transfer *
+            </label>
+            <input
+              type="file"
+              required
+              accept="image/*"
+              onChange={handleProofFileChange}
+              className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-red-50 file:text-red-700 hover:file:bg-red-100 cursor-pointer"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Format: JPG, JPEG, PNG, atau WebP (Maksimal 5MB).
+            </p>
+          </div>
+
+          {proofPreview && (
+            <div className="p-2 border border-slate-200 rounded-xl bg-slate-50">
+              <p className="text-[10px] font-bold text-slate-500 mb-1">Pratinjau Foto:</p>
+              <div className="max-h-48 rounded-lg overflow-hidden flex items-center justify-center bg-black/5">
+                <img src={proofPreview} alt="Preview" className="max-h-48 object-contain rounded-lg" />
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setUploadProofModalOpen(false)}
+              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-600 transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={uploadingProof || !proofFile}
+              className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md shadow-red-200 transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>{uploadingProof ? 'Mengunggah...' : 'Kirim Bukti Transfer'}</span>
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL ZOOM PREVIEW BUKTI TRANSFER */}
+      <Modal
+        isOpen={previewProofModalOpen}
+        onClose={() => setPreviewProofModalOpen(false)}
+        title="Bukti Transfer Pembayaran"
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl overflow-hidden bg-slate-900 flex items-center justify-center p-2 min-h-60 max-h-[70vh]">
+            {previewProofUrl ? (
+              <img
+                src={previewProofUrl}
+                alt="Bukti Transfer Zoom"
+                className="max-h-[65vh] w-auto object-contain rounded-lg shadow-lg"
+              />
+            ) : (
+              <p className="text-xs text-slate-400">Bukti tidak ditemukan</p>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setPreviewProofModalOpen(false)}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 transition"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {/* CONFIRM DIALOG BATAL / HAPUS RESERVASI */}

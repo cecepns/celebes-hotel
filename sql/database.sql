@@ -170,6 +170,8 @@ CREATE TABLE rooms (
   name VARCHAR(150) NOT NULL,
   description TEXT NULL,
   price DECIMAL(15,2) NOT NULL,
+  price_ramadan DECIMAL(15,2) NULL,
+  price_new_year DECIMAL(15,2) NULL,
   capacity INT DEFAULT 2,
   total_rooms INT DEFAULT 10,
   facilities VARCHAR(255) NULL,
@@ -197,6 +199,9 @@ CREATE TABLE reservations (
   discount_amount DECIMAL(15,2) DEFAULT 0,
   total_price DECIMAL(15,2) DEFAULT 0,
   source VARCHAR(50) DEFAULT 'app_hch',
+  payment_proof VARCHAR(255) NULL,
+  payment_status ENUM('unpaid', 'pending_verification', 'paid') DEFAULT 'unpaid',
+  payment_proof_uploaded_at DATETIME NULL,
   notes TEXT NULL,
   status ENUM('inquiry', 'confirmed', 'checked_in', 'completed', 'cancelled') DEFAULT 'inquiry',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -216,6 +221,21 @@ CREATE TABLE closed_dates (
   INDEX idx_dates (start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ----------------------------------------------------------
+-- 12. Tabel Notifications (Notifikasi Akun Tamu)
+-- ----------------------------------------------------------
+CREATE TABLE notifications (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  title VARCHAR(150) NOT NULL,
+  message TEXT NOT NULL,
+  type ENUM('point_in', 'point_out', 'point_adjustment', 'reservation', 'reward', 'system') DEFAULT 'system',
+  is_read TINYINT(1) DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_user_notif (user_id, is_read, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ==========================================================
 -- SEED DATA
 -- ==========================================================
@@ -232,7 +252,13 @@ INSERT INTO settings (setting_key, setting_value, description) VALUES
 ('hotel_address', 'Jl. Sultan Hasanuddin No. 2 Makassar', 'Alamat Hotel'),
 ('hotel_phone', '+62411 3620770', 'Nomor Telepon Kantor'),
 ('instagram_username', 'celebeshtl', 'Akun Instagram'),
-('hch_member_discount_percent', '10', 'Persentase diskon reservasi kamar via aplikasi HCH (%)');
+('hch_member_discount_percent', '10', 'Persentase diskon reservasi kamar via aplikasi HCH (%)'),
+('payment_bank_name', 'Bank BCA', 'Nama Bank Pembayaran Reservasi'),
+('payment_bank_account', '123-456-7890', 'Nomor Rekening Bank Pembayaran'),
+('payment_account_name', 'Hotel Celebes Hasanuddin', 'Nama Pemilik Rekening'),
+('ramadan_start_date', '2027-02-18', 'Tanggal Mulai Periode Ramadhan (Puasa)'),
+('ramadan_end_date', '2027-03-20', 'Tanggal Akhir Periode Ramadhan (Lebaran)'),
+('new_year_date', '12-31', 'Tanggal Malam Tahun Baru (MM-DD)');
 
 -- Users (admin: admin / admin123, supervisor: supervisor / admin123, resepsionis: reception / admin123, member demo: rosdiana / 123456)
 INSERT INTO users (id, name, phone, email, password, role, member_code, total_points, created_at) VALUES

@@ -12,6 +12,8 @@ import {
   TrendingUp,
   History,
   Info,
+  Sliders,
+  AlertCircle,
 } from 'lucide-react';
 import { Skeleton } from '@/components/common/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -46,6 +48,8 @@ export const PointsDetail = () => {
   const expiring30Days = ledgers
     .filter((l) => !l.is_expired && l.points_remaining > 0 && l.days_left >= 0 && l.days_left <= 30)
     .reduce((acc, curr) => acc + (curr.points_remaining || 0), 0);
+
+  const adjustments = ledgers.filter((l) => l.source_type === 'adjustment');
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col pb-24">
@@ -89,6 +93,61 @@ export const PointsDetail = () => {
             </span>
           </div>
         </div>
+
+        {/* Kotak Informasi Penyesuaian Saldo Poin Oleh Admin/Supervisor */}
+        {adjustments.length > 0 && (
+          <div className="bg-gradient-to-br from-indigo-50/90 to-blue-50/50 border border-indigo-200/90 rounded-2xl p-4 space-y-2.5 shadow-xs">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                <Sliders className="w-4 h-4 text-indigo-600" />
+                Informasi Penyesuaian Saldo Poin
+              </h3>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                {adjustments.length} Catatan
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600">
+              Catatan penjelasan resmi dari manajemen hotel mengenai penyesuaian atau koreksi saldo akun Anda:
+            </p>
+
+            <div className="space-y-2 pt-1">
+              {adjustments.map((adj) => (
+                <div
+                  key={adj.id}
+                  className="bg-white rounded-xl p-3 border border-indigo-100 shadow-xs flex items-start justify-between gap-3"
+                >
+                  <div className="flex-1">
+                    <p
+                      className={`text-xs font-bold leading-snug ${
+                        adj.points_earned < 0 ? 'text-red-700' : 'text-emerald-700'
+                      }`}
+                    >
+                      {adj.description}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-slate-300" />
+                      {new Date(adj.earned_date).toLocaleString('id-ID', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span
+                      className={`text-xs font-extrabold px-2.5 py-1 rounded-lg ${
+                        adj.points_earned < 0
+                          ? 'bg-red-50 text-red-700 border border-red-200'
+                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}
+                    >
+                      {adj.points_earned > 0 ? `+${adj.points_earned}` : adj.points_earned} pts
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Catatan Ketentuan Poin */}
         <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-2.5 text-xs text-amber-950">

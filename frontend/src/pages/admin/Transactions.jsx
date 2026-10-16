@@ -25,6 +25,9 @@ import {
   XCircle,
   Check,
   X,
+  Sliders,
+  MinusCircle,
+  PlusCircle,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { Pagination } from '@/components/common/Pagination';
@@ -240,7 +243,8 @@ export const AdminTransactions = () => {
     setBonusData({
       user_id: '',
       points: isSupervisor ? 10 : 25,
-      notes: '',
+      type: 'add',
+      reason: '',
     });
     setBonusModalOpen(true);
   };
@@ -318,21 +322,31 @@ export const AdminTransactions = () => {
       return;
     }
 
+    if (!bonusData.reason || !bonusData.reason.trim()) {
+      toast.error('Alasan / catatan penyesuaian wajib diisi agar tamu mendapatkan informasi yang jelas');
+      return;
+    }
+
     if (isSupervisor && Number(bonusData.points) > 50) {
-      toast.error('Supervisor hanya dapat memberikan maksimal 50 poin bonus per aksi');
+      toast.error('Supervisor hanya dapat menyesuaikan maksimal 50 poin per tindakan');
       return;
     }
 
     try {
       setSubmitting(true);
-      const res = await request.post(API_ENDPOINTS.ADMIN.TRANSACTIONS.MANUAL_BONUS, bonusData);
+      const res = await request.post(API_ENDPOINTS.ADMIN.TRANSACTIONS.ADJUST_POINTS, {
+        user_id: bonusData.user_id,
+        points: bonusData.points,
+        type: bonusData.type || 'add',
+        reason: bonusData.reason.trim(),
+      });
       if (res.success) {
-        toast.success(res.message || 'Bonus poin manual berhasil ditambahkan!');
+        toast.success(res.message || 'Penyesuaian saldo poin berhasil diproses!');
         setBonusModalOpen(false);
         fetchTransactions(1, pagination.limit);
       }
     } catch (err) {
-      toast.error(typeof err === 'string' ? err : 'Gagal memberikan bonus poin');
+      toast.error(typeof err === 'string' ? err : 'Gagal memproses penyesuaian poin');
     } finally {
       setSubmitting(false);
     }
@@ -414,15 +428,15 @@ export const AdminTransactions = () => {
             <span>Download Excel</span>
           </button>
 
-          {/* Bonus Poin Manual: Supervisor (Terbatas max 50 pts) & Admin (Full) */}
+          {/* Penyesuaian / Koreksi Poin: Supervisor (Terbatas max 50 pts) & Admin (Full) */}
           {(isSuperAdmin || isSupervisor) && (
             <button
               type="button"
               onClick={handleOpenBonus}
-              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5"
             >
-              <Gift className="w-4 h-4" />
-              <span>Bonus Poin Manual</span>
+              <Sliders className="w-4 h-4" />
+              <span>Koreksi / Penyesuaian Poin</span>
             </button>
           )}
 
@@ -1024,19 +1038,53 @@ export const AdminTransactions = () => {
         )}
       </Modal>
 
-      {/* Modal Bonus Poin Manual */}
+      {/* Modal Penyesuaian / Koreksi Poin Tamu */}
       <Modal
         isOpen={bonusModalOpen}
         onClose={() => setBonusModalOpen(false)}
-        title="Berikan Bonus Poin Manual"
+        title="Penyesuaian / Koreksi Poin Tamu"
         subtitle={
           isSupervisor
-            ? 'Supervisor dapat memberikan apresiasi bonus poin manual hingga maksimal 50 poin'
-            : 'Admin dapat memberikan bonus poin manual tanpa batasan'
+            ? 'Supervisor dapat melakukan penyesuaian (tambah/potong) hingga maksimal 50 poin'
+            : 'Admin dapat melakukan penyesuaian saldo poin tanpa batasan'
         }
         maxWidth="max-w-md"
       >
         <form onSubmit={handleBonusSubmit} className="space-y-3.5">
+          {/* Action Type Toggle */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Jenis Tindakan Penyesuaian *
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setBonusData({ ...bonusData, type: 'add' })}
+                className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                  (bonusData.type || 'add') === 'add'
+                    ? 'bg-emerald-50 border-emerald-500 text-emerald-700 ring-2 ring-emerald-500/20'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <PlusCircle className="w-4 h-4 text-emerald-600" />
+                <span>+ Tambah Poin</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBonusData({ ...bonusData, type: 'deduct' })}
+                className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                  bonusData.type === 'deduct'
+                    ? 'bg-red-50 border-red-500 text-red-700 ring-2 ring-red-500/20'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <MinusCircle className="w-4 h-4 text-red-600" />
+                <span>- Potong Poin</span>
+              </button>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               Pilih Tamu / Member *
@@ -1055,36 +1103,50 @@ export const AdminTransactions = () => {
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
-              <span>Jumlah Poin Bonus *</span>
+              <span>Jumlah Poin *</span>
               {isSupervisor && (
                 <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                   Maks. 50 Poin (Supervisor)
                 </span>
               )}
             </label>
-            <input
-              type="number"
-              required
-              min="1"
-              max={isSupervisor ? 50 : 10000}
-              value={bonusData.points}
-              onChange={(e) => setBonusData({ ...bonusData, points: e.target.value })}
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-bold text-amber-600"
-            />
+            <div className="relative">
+              <input
+                type="number"
+                required
+                min="1"
+                max={isSupervisor ? 50 : 100000}
+                value={bonusData.points}
+                onChange={(e) => setBonusData({ ...bonusData, points: e.target.value })}
+                className={`w-full text-xs p-2.5 rounded-xl border font-bold focus:outline-none focus:ring-2 ${
+                  bonusData.type === 'deduct'
+                    ? 'border-red-300 text-red-600 focus:ring-red-500/20 focus:border-red-500'
+                    : 'border-emerald-300 text-emerald-600 focus:ring-emerald-500/20 focus:border-emerald-500'
+                }`}
+              />
+              <span className="absolute right-3.5 top-2.5 text-xs font-bold text-slate-400">PTS</span>
+            </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              Alasan / Catatan Bonus *
+              Alasan / Keterangan Penyesuaian *
             </label>
             <textarea
               rows={2}
               required
-              value={bonusData.notes}
-              onChange={(e) => setBonusData({ ...bonusData, notes: e.target.value })}
-              placeholder="Contoh: Apresiasi Ulang Tahun / Kompensasi Layanan Kamar"
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              value={bonusData.reason}
+              onChange={(e) => setBonusData({ ...bonusData, reason: e.target.value })}
+              placeholder={
+                bonusData.type === 'deduct'
+                  ? 'Contoh: Koreksi salah input nota kamar #102'
+                  : 'Contoh: Apresiasi Ulang Tahun / Kompensasi Kamar'
+              }
+              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
             />
+            <p className="text-[10px] text-indigo-700 bg-indigo-50/70 p-2 rounded-lg border border-indigo-100 mt-1.5 leading-relaxed">
+              💡 <strong>Kotak Informasi Tamu:</strong> Alasan penyesuaian ini akan langsung ditampilkan di riwayat poin akun tamu dan dikirimkan via notifikasi aplikasi.
+            </p>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
@@ -1098,9 +1160,17 @@ export const AdminTransactions = () => {
             <button
               type="submit"
               disabled={submitting}
-              className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-sm transition disabled:opacity-50"
+              className={`px-5 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition disabled:opacity-50 ${
+                bonusData.type === 'deduct'
+                  ? 'bg-red-600 hover:bg-red-700'
+                  : 'bg-emerald-600 hover:bg-emerald-700'
+              }`}
             >
-              {submitting ? 'Mengirim...' : 'Kirim Bonus Poin'}
+              {submitting
+                ? 'Memproses...'
+                : bonusData.type === 'deduct'
+                ? 'Potong Poin Member'
+                : 'Tambah Poin Member'}
             </button>
           </div>
         </form>

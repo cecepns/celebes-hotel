@@ -110,6 +110,18 @@ const initSchemaUpdates = async () => {
     if (!rExisting.includes('source')) {
       await pool.query("ALTER TABLE reservations ADD COLUMN source VARCHAR(50) DEFAULT 'app_hch'");
     }
+    if (!rExisting.includes('payment_proof')) {
+      await pool.query('ALTER TABLE reservations ADD COLUMN payment_proof VARCHAR(255) NULL AFTER source');
+      console.log('✅ Added payment_proof to reservations');
+    }
+    if (!rExisting.includes('payment_status')) {
+      await pool.query("ALTER TABLE reservations ADD COLUMN payment_status ENUM('unpaid', 'pending_verification', 'paid') DEFAULT 'unpaid' AFTER payment_proof");
+      console.log('✅ Added payment_status to reservations');
+    }
+    if (!rExisting.includes('payment_proof_uploaded_at')) {
+      await pool.query('ALTER TABLE reservations ADD COLUMN payment_proof_uploaded_at DATETIME NULL AFTER payment_status');
+      console.log('✅ Added payment_proof_uploaded_at to reservations');
+    }
 
     // 4. closed_dates table
     await pool.query(`CREATE TABLE IF NOT EXISTS closed_dates (
@@ -141,11 +153,68 @@ const initSchemaUpdates = async () => {
       await pool.query('ALTER TABLE transactions ADD COLUMN rejection_reason VARCHAR(255) NULL AFTER approved_at');
       console.log('✅ Added rejection_reason to transactions');
     }
+
+    // 6. rooms columns for seasonal pricing (Ramadhan & Tahun Baru)
+    const [roomCols] = await pool.query('SHOW COLUMNS FROM rooms');
+    const roomExisting = roomCols.map(c => c.Field.toLowerCase());
+    if (!roomExisting.includes('price_ramadan')) {
+      await pool.query('ALTER TABLE rooms ADD COLUMN price_ramadan DECIMAL(15,2) NULL AFTER price');
+      console.log('✅ Added price_ramadan to rooms');
+    }
+    if (!roomExisting.includes('price_new_year')) {
+      await pool.query('ALTER TABLE rooms ADD COLUMN price_new_year DECIMAL(15,2) NULL AFTER price_ramadan');
+      console.log('✅ Added price_new_year to rooms');
+    }
+
+    // 7. notifications table (In-App Notifikasi Tamu)
+    await pool.query(`CREATE TABLE IF NOT EXISTS notifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      title VARCHAR(150) NOT NULL,
+      message TEXT NOT NULL,
+      type ENUM('point_in', 'point_out', 'point_adjustment', 'reservation', 'reward', 'system') DEFAULT 'system',
+      is_read TINYINT(1) DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_user_notif (user_id, is_read, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    console.log('✅ Verified notifications table');
+
+    // 8. Ensure essential seasonal & bank settings exist
+    const defaultSettings = [
+      ['ramadan_start_date', '2027-02-18', 'Tanggal Mulai Periode Ramadhan (Puasa)'],
+      ['ramadan_end_date', '2027-03-20', 'Tanggal Akhir Periode Ramadhan (Lebaran)'],
+      ['new_year_date', '12-31', 'Tanggal Malam Tahun Baru (MM-DD)'],
+      ['payment_bank_name', 'Bank BCA', 'Nama Bank Pembayaran Reservasi'],
+      ['payment_bank_account', '123-456-7890', 'Nomor Rekening Bank Pembayaran'],
+      ['payment_account_name', 'Hotel Celebes Hasanuddin', 'Nama Pemilik Rekening'],
+    ];
+
+    for (const [key, val, desc] of defaultSettings) {
+      await pool.query(
+        'INSERT IGNORE INTO settings (setting_key, setting_value, description) VALUES (?, ?, ?)',
+        [key, val, desc]
+      );
+    }
   } catch (err) {
     console.warn('DB schema check:', err.message);
   }
 };
 initSchemaUpdates();
+
+// Helper: In-App Notification Dispatcher
+const createNotification = async (userId, title, message, type = 'system', customConn = null) => {
+  if (!userId) return;
+  try {
+    const executor = customConn || pool;
+    await executor.query(
+      'INSERT INTO notifications (user_id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [userId, title, message, type]
+    );
+  } catch (err) {
+    console.warn('createNotification error:', err.message);
+  }
+};
 
 // Helper: Standard Pagination Response
 const formatPaginatedResponse = (data, page, limit, total) => {
@@ -958,8 +1027,80 @@ app.get('/api/closed-dates/public', async (req, res) => {
   }
 });
 
-// Member Create Reservation
-app.post('/api/member/reservations', async (req, res) => {
+// Helper: Calculate Reservation Pricing with Seasonal Rates (Ramadan & New Year)
+const calculateReservationPricing = async (roomType, checkIn, checkOut, numRooms = 1) => {
+  const [roomRows] = await pool.query('SELECT price, price_ramadan, price_new_year FROM rooms WHERE name = ?', [roomType]);
+  const room = roomRows.length > 0 ? roomRows[0] : null;
+  const normalPrice = room ? parseFloat(room.price) : 350000;
+  const ramadanPrice = room && room.price_ramadan !== null && room.price_ramadan !== undefined && !isNaN(room.price_ramadan)
+    ? parseFloat(room.price_ramadan)
+    : normalPrice;
+  const newYearPrice = room && room.price_new_year !== null && room.price_new_year !== undefined && !isNaN(room.price_new_year)
+    ? parseFloat(room.price_new_year)
+    : normalPrice;
+
+  const settings = await getSettingsMap();
+  const ramadanStart = settings.ramadan_start_date ? String(settings.ramadan_start_date).split('T')[0] : null;
+  const ramadanEnd = settings.ramadan_end_date ? String(settings.ramadan_end_date).split('T')[0] : null;
+  const newYearDate = settings.new_year_date || '12-31';
+
+  let current = new Date(checkIn);
+  const end = new Date(checkOut);
+  let nights = 0;
+  let baseTotalPerRoom = 0;
+  let ramadanNights = 0;
+  let newYearNights = 0;
+  let normalNights = 0;
+
+  while (current < end) {
+    nights++;
+    const yyyy = current.getFullYear();
+    const mm = String(current.getMonth() + 1).padStart(2, '0');
+    const dd = String(current.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    const monthDay = `${mm}-${dd}`;
+
+    if (monthDay === '12-31' || dateStr === newYearDate) {
+      baseTotalPerRoom += newYearPrice;
+      newYearNights++;
+    } else if (ramadanStart && ramadanEnd && dateStr >= ramadanStart && dateStr <= ramadanEnd) {
+      baseTotalPerRoom += ramadanPrice;
+      ramadanNights++;
+    } else {
+      baseTotalPerRoom += normalPrice;
+      normalNights++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  nights = Math.max(1, nights);
+  if (baseTotalPerRoom === 0) baseTotalPerRoom = normalPrice * nights;
+  const baseTotal = baseTotalPerRoom * parseInt(numRooms || 1);
+
+  const discountPercent = settings.hch_member_discount_percent !== undefined && settings.hch_member_discount_percent !== null && settings.hch_member_discount_percent !== ''
+    ? Math.max(0, Math.min(100, parseFloat(settings.hch_member_discount_percent)))
+    : 10;
+  const discountAmount = Math.round(baseTotal * (discountPercent / 100));
+  const finalTotal = Math.max(0, baseTotal - discountAmount);
+
+  return {
+    nights,
+    normalNights,
+    ramadanNights,
+    newYearNights,
+    normalPrice,
+    ramadanPrice,
+    newYearPrice,
+    baseTotal,
+    discountPercent,
+    discountAmount,
+    finalTotal,
+    settings
+  };
+};
+
+// Member Create Reservation (supports payment_proof file)
+app.post('/api/member/reservations', upload.single('payment_proof'), async (req, res) => {
   try {
     const { guest_name, guest_phone, room_type, check_in, check_out, num_rooms = 1, num_guests = 2, notes } = req.body;
     let userId = null;
@@ -992,25 +1133,30 @@ app.post('/api/member/reservations', async (req, res) => {
       });
     }
 
-    // Calculate nights & discount HCH
-    const [roomRows] = await pool.query('SELECT price FROM rooms WHERE name = ?', [room_type]);
-    const roomPrice = roomRows.length > 0 ? parseFloat(roomRows[0].price) : 350000;
-    const d1 = new Date(check_in);
-    const d2 = new Date(check_out);
-    const nights = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
-    const baseTotal = roomPrice * nights * parseInt(num_rooms);
+    // Calculate nights & seasonal pricing
+    const calc = await calculateReservationPricing(room_type, check_in, check_out, num_rooms);
+    const { nights, normalNights, ramadanNights, newYearNights, discountPercent, discountAmount, finalTotal, settings } = calc;
 
-    const settings = await getSettingsMap();
-    const discountPercent = settings.hch_member_discount_percent !== undefined && settings.hch_member_discount_percent !== null && settings.hch_member_discount_percent !== ''
-      ? Math.max(0, Math.min(100, parseFloat(settings.hch_member_discount_percent)))
-      : 10;
-    const discountAmount = Math.round(baseTotal * (discountPercent / 100));
-    const finalTotal = Math.max(0, baseTotal - discountAmount);
+    const paymentProof = req.file ? `/uploads/${req.file.filename}` : null;
+    const paymentStatus = paymentProof ? 'pending_verification' : 'unpaid';
+    const paymentProofUploadedAt = paymentProof ? new Date() : null;
 
     const [result] = await pool.query(
-      'INSERT INTO reservations (user_id, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, discount_percent, discount_amount, total_price, source, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "app_hch", ?, "inquiry")',
-      [userId, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, discountPercent, discountAmount, finalTotal, notes || null]
+      'INSERT INTO reservations (user_id, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, discount_percent, discount_amount, total_price, source, payment_proof, payment_status, payment_proof_uploaded_at, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "app_hch", ?, ?, ?, ?, "inquiry")',
+      [userId, guest_name, guest_phone, room_type, check_in, check_out, num_rooms, num_guests, discountPercent, discountAmount, finalTotal, paymentProof, paymentStatus, paymentProofUploadedAt, notes || null]
     );
+
+    const reservationId = result.insertId;
+
+    // Send in-app notification if user is logged in
+    if (userId) {
+      await createNotification(
+        userId,
+        'Reservasi Berhasil Dibuat',
+        `Reservasi kamar ${room_type} (${nights} malam) berhasil didaftarkan (Booking #${reservationId}). Tim resepsionis akan segera mengonfirmasi ketersediaan kamar.`,
+        'reservation'
+      );
+    }
 
     const formatWaDate = (dateStr) => {
       if (!dateStr) return '-';
@@ -1024,16 +1170,28 @@ app.post('/api/member/reservations', async (req, res) => {
     const discountHeader = discountPercent > 0 ? ` (Diskon Member ${discountPercent}%)` : '';
     const discountEstimate = discountAmount > 0 ? ` (Hemat Diskon Rp ${Number(discountAmount).toLocaleString('id-ID')})` : '';
 
+    let seasonRateNote = '';
+    if (ramadanNights > 0 || newYearNights > 0) {
+      const parts = [];
+      if (ramadanNights > 0) parts.push(`${ramadanNights} Malam Tarif Ramadhan`);
+      if (newYearNights > 0) parts.push(`${newYearNights} Malam Tarif Tahun Baru`);
+      if (normalNights > 0) parts.push(`${normalNights} Malam Normal`);
+      seasonRateNote = `\n- Rincian Musim: ${parts.join(', ')}`;
+    }
+
+    const paymentProofNote = paymentProof ? '\n- Bukti Transfer Bank: Sudah dilampirkan via aplikasi' : '';
+
     const waText = encodeURIComponent(
       `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin konfirmasi reservasi kamar via Aplikasi HCH${discountHeader}:\n` +
+      `- Booking ID: #${reservationId}\n` +
       `- Nama Tamu: ${guest_name}\n` +
       `- No. HP: ${guest_phone}\n` +
-      `- Tipe Kamar: ${room_type} (${num_rooms} Kamar, ${nights} Malam)\n` +
+      `- Tipe Kamar: ${room_type} (${num_rooms} Kamar, ${nights} Malam)${seasonRateNote}\n` +
       `- Check-In: ${formatWaDate(check_in)}\n` +
       `- Check-Out: ${formatWaDate(check_out)}\n` +
-      `- Estimasi Total: Rp ${Number(finalTotal).toLocaleString('id-ID')}${discountEstimate}\n` +
+      `- Estimasi Total: Rp ${Number(finalTotal).toLocaleString('id-ID')}${discountEstimate}${paymentProofNote}\n` +
       `${notes ? `- Catatan: ${notes}\n` : ''}` +
-      `Mohon informasi nomor rekening / QRIS untuk pelunasan (cashless) sebelum check-in. Terima kasih!`
+      `Mohon konfirmasi ketersediaan kamar dan status pembayaran. Terima kasih!`
     );
     const waUrl = `https://wa.me/${waNumber}?text=${waText}`;
 
@@ -1041,10 +1199,12 @@ app.post('/api/member/reservations', async (req, res) => {
       success: true,
       message: 'Reservasi berhasil dicatat! Tim resepsionis akan segera mengonfirmasi ketersediaan kamar.',
       data: {
-        id: result.insertId,
+        id: reservationId,
         discount_percent: discountPercent,
         discount_amount: discountAmount,
         total_price: finalTotal,
+        payment_proof: paymentProof,
+        payment_status: paymentStatus,
         whatsapp_url: waUrl
       }
     });
@@ -1098,20 +1258,9 @@ app.put('/api/member/reservations/:id', verifyToken, async (req, res) => {
       });
     }
 
-    // Recalculate price & discount
-    const [roomRows] = await pool.query('SELECT price FROM rooms WHERE name = ?', [room_type]);
-    const roomPrice = roomRows.length > 0 ? parseFloat(roomRows[0].price) : 350000;
-    const d1 = new Date(check_in);
-    const d2 = new Date(check_out);
-    const nights = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
-    const baseTotal = roomPrice * nights * parseInt(num_rooms);
-
-    const settings = await getSettingsMap();
-    const discountPercent = settings.hch_member_discount_percent !== undefined && settings.hch_member_discount_percent !== null && settings.hch_member_discount_percent !== ''
-      ? Math.max(0, Math.min(100, parseFloat(settings.hch_member_discount_percent)))
-      : 10;
-    const discountAmount = Math.round(baseTotal * (discountPercent / 100));
-    const finalTotal = Math.max(0, baseTotal - discountAmount);
+    // Recalculate price with seasonal rates
+    const calc = await calculateReservationPricing(room_type, check_in, check_out, num_rooms);
+    const { nights, discountPercent, discountAmount, finalTotal, settings } = calc;
 
     await pool.query(
       `UPDATE reservations 
@@ -1161,6 +1310,52 @@ app.put('/api/member/reservations/:id', verifyToken, async (req, res) => {
   }
 });
 
+// Member Upload Payment Proof for an existing reservation
+app.post('/api/member/reservations/:id/payment-proof', verifyToken, upload.single('payment_proof'), async (req, res) => {
+  try {
+    const reservationId = req.params.id;
+    const userId = req.user.id;
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'File foto/gambar bukti transfer bank wajib dilampirkan' });
+    }
+
+    const [rows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [reservationId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Data reservasi tidak ditemukan' });
+    }
+
+    if (rows[0].user_id && rows[0].user_id !== userId && req.user.role === 'member') {
+      return res.status(403).json({ success: false, message: 'Anda tidak memiliki hak akses untuk reservasi ini' });
+    }
+
+    const proofUrl = `/uploads/${req.file.filename}`;
+    await pool.query(
+      'UPDATE reservations SET payment_proof = ?, payment_status = "pending_verification", payment_proof_uploaded_at = NOW() WHERE id = ?',
+      [proofUrl, reservationId]
+    );
+
+    // Notify user
+    await createNotification(
+      userId,
+      'Bukti Transfer Terkirim',
+      `Bukti transfer bank untuk Booking #${reservationId} berhasil diunggah dan sedang dalam proses verifikasi oleh resepsionis.`,
+      'reservation'
+    );
+
+    res.json({
+      success: true,
+      message: 'Bukti transfer bank berhasil diunggah! Resepsionis akan segera memverifikasi pembayaran Anda.',
+      data: {
+        payment_proof: proofUrl,
+        payment_status: 'pending_verification'
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Member Delete / Cancel Reservation
 app.delete('/api/member/reservations/:id', verifyToken, async (req, res) => {
   try {
@@ -1175,6 +1370,79 @@ app.delete('/api/member/reservations/:id', verifyToken, async (req, res) => {
 
     await pool.query('DELETE FROM reservations WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     res.json({ success: true, message: 'Reservasi berhasil dibatalkan / dihapus' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ==========================================================
+// MEMBER NOTIFICATIONS ROUTES
+// ==========================================================
+app.get('/api/member/notifications', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { page = 1, limit = 15 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const [unreadRows] = await pool.query(
+      'SELECT COUNT(*) as unread_count FROM notifications WHERE user_id = ? AND is_read = 0',
+      [userId]
+    );
+    const unreadCount = unreadRows[0]?.unread_count || 0;
+
+    const [countRows] = await pool.query(
+      'SELECT COUNT(*) as total FROM notifications WHERE user_id = ?',
+      [userId]
+    );
+    const total = countRows[0]?.total || 0;
+
+    const [rows] = await pool.query(
+      'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      [userId, parseInt(limit), parseInt(offset)]
+    );
+
+    res.json({
+      success: true,
+      data: rows,
+      unread_count: unreadCount,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)) || 1
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.get('/api/member/notifications/unread-count', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const [rows] = await pool.query(
+      'SELECT COUNT(*) as unread_count FROM notifications WHERE user_id = ? AND is_read = 0',
+      [userId]
+    );
+    res.json({ success: true, unread_count: rows[0]?.unread_count || 0 });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/member/notifications/:id/read', verifyToken, async (req, res) => {
+  try {
+    await pool.query('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ success: true, message: 'Notifikasi ditandai telah dibaca' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/member/notifications/read-all', verifyToken, async (req, res) => {
+  try {
+    await pool.query('UPDATE notifications SET is_read = 1 WHERE user_id = ?', [req.user.id]);
+    res.json({ success: true, message: 'Semua notifikasi berhasil ditandai telah dibaca' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -1854,6 +2122,15 @@ app.put('/api/admin/transactions/:id/approve', verifySupervisorOrAdmin, async (r
       );
 
       await connection.query('UPDATE users SET total_points = total_points + ? WHERE id = ?', [trans.points_earned, trans.user_id]);
+
+      // In-App Notification
+      await createNotification(
+        trans.user_id,
+        'Poin Belanja Masuk!',
+        `Selamat! Transaksi #${trans.invoice_no} (${trans.category.toUpperCase()}) telah disetujui. +${trans.points_earned} poin telah ditambahkan ke akun Anda!`,
+        'point_in',
+        connection
+      );
     }
 
     await connection.commit();
@@ -1901,6 +2178,15 @@ app.put('/api/admin/transactions/:id/reject', verifySupervisorOrAdmin, async (re
     await connection.query(
       'UPDATE transactions SET status = "rejected", approved_by = ?, approved_at = NOW(), rejection_reason = ? WHERE id = ?',
       [req.user.id, reason.trim(), id]
+    );
+
+    // In-App Notification
+    await createNotification(
+      trans.user_id,
+      'Transaksi Ditolak',
+      `Transaksi #${trans.invoice_no} ditolak oleh pihak hotel. Alasan: ${reason.trim()}`,
+      'system',
+      connection
     );
 
     await connection.commit();
@@ -2036,8 +2322,7 @@ app.delete('/api/admin/transactions/:id', verifySupervisorOrAdmin, async (req, r
   }
 });
 
-// Bonus Poin Manual (Adjustment)
-// Hak akses: Receptionist [X], Supervisor [Terbatas: Max 50 pts], Admin [V: Unlimited]
+// Bonus Poin Manual (Backward Compatibility)
 app.post('/api/admin/transactions/manual-bonus', verifySupervisorOrAdmin, async (req, res) => {
   const connection = await pool.getConnection();
   try {
@@ -2070,12 +2355,145 @@ app.post('/api/admin/transactions/manual-bonus', verifySupervisorOrAdmin, async 
     );
 
     await connection.query('UPDATE users SET total_points = total_points + ? WHERE id = ?', [numPoints, user_id]);
+
+    await createNotification(
+      user_id,
+      'Bonus Poin Diterima!',
+      `Selamat! Akun Anda mendapatkan bonus +${numPoints} poin dari hotel. Catatan: ${desc}`,
+      'point_in',
+      connection
+    );
+
     await connection.commit();
 
     res.status(201).json({
       success: true,
       message: `Berhasil menambahkan +${numPoints} bonus poin manual ke akun member!`
     });
+  } catch (err) {
+    await connection.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// Penyesuaian / Koreksi Poin Tamu (+ Tambah atau - Potong karena salah input nota)
+// Wajib menyertakan alasan penyesuaian untuk transparansi ke user
+app.post('/api/admin/transactions/adjust-points', verifySupervisorOrAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { user_id, points, type = 'add', reason } = req.body;
+    const numPoints = parseInt(points);
+
+    if (!user_id || !numPoints || numPoints <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: 'Tamu dan jumlah poin (> 0) wajib diisi' });
+    }
+
+    if (!reason || !reason.trim()) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Alasan / catatan koreksi wajib diisi agar tamu dapat melihat kotak informasi transparan.'
+      });
+    }
+
+    // Supervisor limit check
+    if (req.user.role === 'supervisor' && numPoints > 50) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Akses terbatas: Supervisor hanya dapat menyesuaikan maksimal 50 poin per tindakan.'
+      });
+    }
+
+    const [userRows] = await connection.query('SELECT id, name, total_points FROM users WHERE id = ? FOR UPDATE', [user_id]);
+    if (userRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Member / Tamu tidak ditemukan' });
+    }
+    const currentPoints = parseInt(userRows[0].total_points) || 0;
+    const cleanReason = reason.trim();
+
+    if (type === 'deduct') {
+      if (currentPoints < numPoints) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Saldo poin member saat ini (${currentPoints} pts) tidak mencukupi untuk pemotongan ${numPoints} poin.`
+        });
+      }
+
+      // Deduct FIFO from active point_ledger batches
+      let remainingNeed = numPoints;
+      const [entries] = await connection.query(
+        'SELECT id, points_remaining FROM point_ledger WHERE user_id = ? AND is_expired = 0 AND points_remaining > 0 ORDER BY earned_date ASC FOR UPDATE',
+        [user_id]
+      );
+
+      for (const entry of entries) {
+        if (remainingNeed <= 0) break;
+        const canTake = Math.min(entry.points_remaining, remainingNeed);
+        const newRemaining = entry.points_remaining - canTake;
+        await connection.query('UPDATE point_ledger SET points_remaining = ? WHERE id = ?', [newRemaining, entry.id]);
+        remainingNeed -= canTake;
+      }
+
+      // Insert negative audit entry in ledger
+      const auditDesc = `[KOREKSI -${numPoints} PTS] ${cleanReason} (Oleh: ${req.user.name} - ${req.user.role.toUpperCase()})`;
+      await connection.query(
+        'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, 0, NOW(), NOW(), 0, "adjustment", ?)',
+        [user_id, -numPoints, auditDesc]
+      );
+
+      const newTotal = currentPoints - numPoints;
+      await connection.query('UPDATE users SET total_points = ? WHERE id = ?', [newTotal, user_id]);
+
+      // In-App Notification
+      await createNotification(
+        user_id,
+        'Koreksi Pemotongan Saldo Poin',
+        `Saldo poin Anda disesuaikan -${numPoints} poin oleh hotel. Alasan: ${cleanReason}`,
+        'point_adjustment',
+        connection
+      );
+
+      await connection.commit();
+      return res.json({
+        success: true,
+        message: `Berhasil memotong -${numPoints} poin dari akun member (${cleanReason}). Saldo baru: ${newTotal} pts.`
+      });
+    } else {
+      // type === 'add'
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 365);
+      const auditDesc = `[PENYESUAIAN +${numPoints} PTS] ${cleanReason} (Oleh: ${req.user.name} - ${req.user.role.toUpperCase()})`;
+
+      await connection.query(
+        'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, ?, NOW(), ?, 0, "adjustment", ?)',
+        [user_id, numPoints, numPoints, expiryDate, auditDesc]
+      );
+
+      const newTotal = currentPoints + numPoints;
+      await connection.query('UPDATE users SET total_points = ? WHERE id = ?', [newTotal, user_id]);
+
+      // In-App Notification
+      await createNotification(
+        user_id,
+        'Penyesuaian Tambahan Saldo Poin',
+        `Saldo poin Anda disesuaikan +${numPoints} poin oleh hotel. Catatan: ${cleanReason}`,
+        'point_adjustment',
+        connection
+      );
+
+      await connection.commit();
+      return res.json({
+        success: true,
+        message: `Berhasil menambahkan +${numPoints} poin ke akun member. Saldo baru: ${newTotal} pts.`
+      });
+    }
   } catch (err) {
     await connection.rollback();
     res.status(500).json({ success: false, message: err.message });
@@ -2111,6 +2529,22 @@ app.get('/api/admin/rewards', verifyAdmin, async (req, res) => {
     );
 
     res.json(formatPaginatedResponse(rows, page, limit, total));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin Export Rewards
+app.get('/api/admin/rewards/export', verifyAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT title AS 'Nama Reward / Voucher', category AS 'Kategori', points_required AS 'Poin Dibutuhkan',
+              IF(stock = -1, 'Unlimited', stock) AS 'Stok', IF(is_active = 1, 'Aktif', 'Nonaktif') AS 'Status',
+              terms AS 'Syarat & Ketentuan', DATE_FORMAT(created_at, '%d-%m-%Y %H:%i') AS 'Dibuat Pada'
+       FROM rewards
+       ORDER BY points_required ASC`
+    );
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2193,6 +2627,22 @@ app.get('/api/admin/missions', verifyAdmin, async (req, res) => {
     );
 
     res.json(formatPaginatedResponse(rows, page, limit, total));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin Export Missions
+app.get('/api/admin/missions/export', verifyAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT title AS 'Judul Misi', type AS 'Tipe Misi', requirement AS 'Ketentuan / Syarat',
+              bonus_points AS 'Bonus Poin', recurrence AS 'Frekuensi', IF(is_active = 1, 'Aktif', 'Nonaktif') AS 'Status',
+              DATE_FORMAT(created_at, '%d-%m-%Y %H:%i') AS 'Dibuat Pada'
+       FROM missions
+       ORDER BY type ASC, bonus_points ASC`
+    );
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2527,8 +2977,64 @@ app.get('/api/admin/reservations', verifyAdmin, async (req, res) => {
 app.put('/api/admin/reservations/:id', verifyAdmin, async (req, res) => {
   try {
     const { status } = req.body;
-    await pool.query('UPDATE reservations SET status = ? WHERE id = ?', [status, req.params.id]);
+    const reservationId = req.params.id;
+
+    const [existing] = await pool.query('SELECT * FROM reservations WHERE id = ?', [reservationId]);
+    if (existing.length === 0) {
+      return res.status(404).json({ success: false, message: 'Data reservasi tidak ditemukan' });
+    }
+
+    await pool.query('UPDATE reservations SET status = ? WHERE id = ?', [status, reservationId]);
+
+    if (existing[0].user_id) {
+      const statusLabels = {
+        inquiry: 'Menunggu Konfirmasi',
+        confirmed: 'Dikonfirmasi',
+        checked_in: 'Check-In',
+        completed: 'Selesai Menginap',
+        cancelled: 'Dibatalkan'
+      };
+      const label = statusLabels[status] || status;
+      await createNotification(
+        existing[0].user_id,
+        'Update Status Reservasi',
+        `Status reservasi kamar ${existing[0].room_type} (Booking #${reservationId}) telah diperbarui menjadi: ${label}.`,
+        'reservation'
+      );
+    }
+
     res.json({ success: true, message: 'Status reservasi berhasil diperbarui' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin Verify Bank Payment
+app.put('/api/admin/reservations/:id/verify-payment', verifyAdmin, async (req, res) => {
+  try {
+    const reservationId = req.params.id;
+    const { payment_status = 'paid' } = req.body;
+
+    const [existing] = await pool.query('SELECT * FROM reservations WHERE id = ?', [reservationId]);
+    if (existing.length === 0) {
+      return res.status(404).json({ success: false, message: 'Data reservasi tidak ditemukan' });
+    }
+
+    await pool.query('UPDATE reservations SET payment_status = ? WHERE id = ?', [payment_status, reservationId]);
+
+    if (existing[0].user_id) {
+      const isPaid = payment_status === 'paid';
+      await createNotification(
+        existing[0].user_id,
+        isPaid ? 'Pembayaran Dikonfirmasi' : 'Update Status Pembayaran',
+        isPaid
+          ? `Bukti transfer bank untuk Booking #${reservationId} telah diverifikasi: LUNAS. Kamar siap untuk Anda.`
+          : `Status pembayaran Booking #${reservationId} telah diubah menjadi: ${payment_status}.`,
+        'reservation'
+      );
+    }
+
+    res.json({ success: true, message: `Status pembayaran berhasil diubah menjadi: ${payment_status}` });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2640,16 +3146,18 @@ app.get('/api/admin/rooms/:id', verifyAdmin, async (req, res) => {
 
 app.post('/api/admin/rooms', verifyAdmin, upload.single('image'), async (req, res) => {
   try {
-    const { name, description, price, capacity = 2, total_rooms = 10, facilities, is_active = 1 } = req.body;
+    const { name, description, price, price_ramadan, price_new_year, capacity = 2, total_rooms = 10, facilities, is_active = 1 } = req.body;
     if (!name || !price) {
-      return res.status(400).json({ success: false, message: 'Nama tipe kamar dan harga wajib diisi' });
+      return res.status(400).json({ success: false, message: 'Nama tipe kamar dan harga normal wajib diisi' });
     }
 
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const numPriceRamadan = price_ramadan && !isNaN(price_ramadan) && parseFloat(price_ramadan) > 0 ? parseFloat(price_ramadan) : null;
+    const numPriceNewYear = price_new_year && !isNaN(price_new_year) && parseFloat(price_new_year) > 0 ? parseFloat(price_new_year) : null;
 
     const [result] = await pool.query(
-      'INSERT INTO rooms (name, description, price, capacity, total_rooms, facilities, image_url, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, description || null, price, capacity || 2, total_rooms || 10, facilities || null, imageUrl, is_active == 1 || is_active === '1' ? 1 : 0]
+      'INSERT INTO rooms (name, description, price, price_ramadan, price_new_year, capacity, total_rooms, facilities, image_url, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, description || null, price, numPriceRamadan, numPriceNewYear, capacity || 2, total_rooms || 10, facilities || null, imageUrl, is_active == 1 || is_active === '1' ? 1 : 0]
     );
 
     res.status(201).json({
@@ -2664,14 +3172,19 @@ app.post('/api/admin/rooms', verifyAdmin, upload.single('image'), async (req, re
 
 app.put('/api/admin/rooms/:id', verifyAdmin, upload.single('image'), async (req, res) => {
   try {
-    const { name, description, price, capacity, total_rooms, facilities, is_active } = req.body;
+    const { name, description, price, price_ramadan, price_new_year, capacity, total_rooms, facilities, is_active } = req.body;
     const roomId = req.params.id;
 
-    const updates = ['name = ?', 'description = ?', 'price = ?', 'capacity = ?', 'total_rooms = ?', 'facilities = ?', 'is_active = ?'];
+    const numPriceRamadan = price_ramadan && !isNaN(price_ramadan) && parseFloat(price_ramadan) > 0 ? parseFloat(price_ramadan) : null;
+    const numPriceNewYear = price_new_year && !isNaN(price_new_year) && parseFloat(price_new_year) > 0 ? parseFloat(price_new_year) : null;
+
+    const updates = ['name = ?', 'description = ?', 'price = ?', 'price_ramadan = ?', 'price_new_year = ?', 'capacity = ?', 'total_rooms = ?', 'facilities = ?', 'is_active = ?'];
     const params = [
       name,
       description || null,
       price,
+      numPriceRamadan,
+      numPriceNewYear,
       capacity || 2,
       total_rooms || 10,
       facilities || null,

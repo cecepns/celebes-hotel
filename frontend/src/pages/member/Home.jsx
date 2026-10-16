@@ -22,11 +22,13 @@ import {
   Info,
   ExternalLink,
   Building2,
+  Bell,
 } from 'lucide-react';
 
 export const Home = () => {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [dashboard, setDashboard] = useState({
     total_points: user?.total_points || 0,
     expiring_points_30d: 0,
@@ -48,9 +50,15 @@ export const Home = () => {
         }
 
         if (isAuthenticated) {
-          const dashRes = await request.get(API_ENDPOINTS.MEMBER.DASHBOARD);
+          const [dashRes, notifRes] = await Promise.all([
+            request.get(API_ENDPOINTS.MEMBER.DASHBOARD),
+            request.get(API_ENDPOINTS.MEMBER.NOTIFICATIONS.UNREAD_COUNT).catch(() => ({})),
+          ]);
           if (dashRes.success && dashRes.data) {
             setDashboard(dashRes.data);
+          }
+          if (notifRes.success) {
+            setUnreadNotifs(notifRes.unread_count || 0);
           }
         }
       } catch (err) {
@@ -130,13 +138,30 @@ export const Home = () => {
         <div className="flex items-center gap-2.5">
           <img src="/logo-hch.jpeg" alt="Celebes Hotel" className="h-9 w-auto object-contain rounded-md" />
         </div>
-        <div className="text-right">
-          <div className="text-[13px] font-extrabold text-slate-800 tracking-tight leading-none">
-            Royalti <span className="text-slate-300">|</span> <span className="text-red-600">Reward HCH</span>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className="text-[13px] font-extrabold text-slate-800 tracking-tight leading-none">
+              Royalti <span className="text-slate-300">|</span> <span className="text-red-600">Reward HCH</span>
+            </div>
+            <div className="text-[9px] font-semibold text-slate-400 tracking-widest uppercase mt-0.5">
+              Hotel Celebes Hasanuddin
+            </div>
           </div>
-          <div className="text-[9px] font-semibold text-slate-400 tracking-widest uppercase mt-0.5">
-            Hotel Celebes Hasanuddin
-          </div>
+
+          {isAuthenticated && (
+            <Link
+              to="/notifications"
+              className="relative p-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80 transition active:scale-95"
+              title="Notifikasi Akun"
+            >
+              <Bell className="w-4 h-4 text-slate-700" />
+              {unreadNotifs > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse shadow-xs">
+                  {unreadNotifs > 9 ? '9+' : unreadNotifs}
+                </span>
+              )}
+            </Link>
+          )}
         </div>
       </header>
 

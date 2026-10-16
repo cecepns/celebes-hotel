@@ -18,7 +18,9 @@ import {
   ShieldAlert,
   Info,
   Bed,
+  Download,
 } from 'lucide-react';
+import { exportToExcel } from '@/utils/excel';
 import { Modal } from '@/components/common/Modal';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Pagination } from '@/components/common/Pagination';
@@ -288,6 +290,22 @@ export const AdminMissions = () => {
     }
   };
 
+  // Handle Export to Excel
+  const handleExportExcel = async () => {
+    try {
+      toast.loading('Menyiapkan file Excel...', { id: 'export-missions' });
+      const res = await request.get(API_ENDPOINTS.ADMIN.MISSIONS.EXPORT);
+      if (res.success && res.data) {
+        exportToExcel(res.data, 'daftar-misi-celebes-hotel.xlsx', 'Daftar Misi HCH');
+        toast.success('Data misi berhasil diekspor ke Excel!', { id: 'export-missions' });
+      } else {
+        toast.error('Tidak ada data misi untuk diekspor', { id: 'export-missions' });
+      }
+    } catch (err) {
+      toast.error('Gagal mengekspor data misi ke Excel', { id: 'export-missions' });
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -302,16 +320,28 @@ export const AdminMissions = () => {
           </p>
         </div>
 
-        {activeTab === 'missions' && isSuperAdmin && (
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             type="button"
-            onClick={handleOpenCreate}
-            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-red-200 transition flex items-center gap-1.5 self-start sm:self-auto"
+            onClick={handleExportExcel}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+            title="Ekspor daftar misi ke file Excel"
           >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Misi</span>
+            <Download className="w-4 h-4" />
+            <span>Ekspor Excel</span>
           </button>
-        )}
+
+          {activeTab === 'missions' && isSuperAdmin && (
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-red-200 transition flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Misi</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tabs Switcher */}

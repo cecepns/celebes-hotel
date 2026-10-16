@@ -13,7 +13,9 @@ import {
   XCircle,
   Tag,
   Info,
+  Download,
 } from 'lucide-react';
+import { exportToExcel } from '@/utils/excel';
 import { Modal } from '@/components/common/Modal';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Pagination } from '@/components/common/Pagination';
@@ -86,6 +88,22 @@ export const AdminRewards = () => {
   useEffect(() => {
     fetchRewards(1, pagination.limit);
   }, [debouncedSearch, categoryFilter]);
+
+  // Handle Export to Excel
+  const handleExportExcel = async () => {
+    try {
+      toast.loading('Menyiapkan file Excel...', { id: 'export-rewards' });
+      const res = await request.get(API_ENDPOINTS.ADMIN.REWARDS.EXPORT);
+      if (res.success && res.data) {
+        exportToExcel(res.data, 'katalog-reward-celebes-hotel.xlsx', 'Katalog Reward');
+        toast.success('Data reward berhasil diekspor ke Excel!', { id: 'export-rewards' });
+      } else {
+        toast.error('Tidak ada data reward untuk diekspor', { id: 'export-rewards' });
+      }
+    } catch (err) {
+      toast.error('Gagal mengekspor data reward ke Excel', { id: 'export-rewards' });
+    }
+  };
 
   const handleOpenCreate = () => {
     setFormData({
@@ -190,16 +208,28 @@ export const AdminRewards = () => {
           </p>
         </div>
 
-        {isSuperAdmin && (
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             type="button"
-            onClick={handleOpenCreate}
-            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-red-200 transition flex items-center gap-1.5 self-start sm:self-auto"
+            onClick={handleExportExcel}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+            title="Ekspor katalog reward voucher ke file Excel"
           >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Reward</span>
+            <Download className="w-4 h-4" />
+            <span>Ekspor Excel</span>
           </button>
-        )}
+
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-red-200 transition flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Reward</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {!isSuperAdmin && (

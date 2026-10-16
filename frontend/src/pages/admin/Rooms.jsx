@@ -49,6 +49,8 @@ export const AdminRooms = () => {
     name: '',
     description: '',
     price: '',
+    price_ramadan: '',
+    price_new_year: '',
     capacity: 2,
     total_rooms: 10,
     facilities: '',
@@ -130,6 +132,8 @@ export const AdminRooms = () => {
       name: room.name || '',
       description: room.description || '',
       price: room.price || '',
+      price_ramadan: room.price_ramadan || '',
+      price_new_year: room.price_new_year || '',
       capacity: Number(room.capacity) || 2,
       total_rooms: Number(room.total_rooms) || 10,
       facilities: room.facilities || '',
@@ -172,6 +176,8 @@ export const AdminRooms = () => {
       data.append('name', formData.name.trim());
       data.append('description', formData.description.trim());
       data.append('price', formData.price);
+      data.append('price_ramadan', formData.price_ramadan || '');
+      data.append('price_new_year', formData.price_new_year || '');
       data.append('capacity', formData.capacity);
       data.append('total_rooms', formData.total_rooms);
       data.append('facilities', formData.facilities.trim());
@@ -210,6 +216,8 @@ export const AdminRooms = () => {
       data.append('name', formData.name.trim());
       data.append('description', formData.description.trim());
       data.append('price', formData.price);
+      data.append('price_ramadan', formData.price_ramadan || '');
+      data.append('price_new_year', formData.price_new_year || '');
       data.append('capacity', formData.capacity);
       data.append('total_rooms', formData.total_rooms);
       data.append('facilities', formData.facilities.trim());
@@ -389,10 +397,28 @@ export const AdminRooms = () => {
 
                       {/* Price */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span className="font-extrabold text-red-600">
-                          Rp {Number(room.price).toLocaleString('id-ID')}
-                        </span>
-                        <span className="text-[10px] text-slate-400 ml-1">/ malam</span>
+                        <div>
+                          <span className="font-extrabold text-slate-900">
+                            Rp {Number(room.price).toLocaleString('id-ID')}
+                          </span>
+                          <span className="text-[10px] text-slate-400 ml-1">/ malam</span>
+                        </div>
+                        <div className="flex flex-col gap-0.5 mt-1 text-[10px]">
+                          {room.price_ramadan ? (
+                            <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 inline-block w-fit">
+                              🌙 Ramadhan: Rp {Number(room.price_ramadan).toLocaleString('id-ID')}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">🌙 Ramadhan: Normal</span>
+                          )}
+                          {room.price_new_year ? (
+                            <span className="text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 inline-block w-fit">
+                              🎉 Thn Baru: Rp {Number(room.price_new_year).toLocaleString('id-ID')}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">🎉 Thn Baru: Normal</span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Capacity */}
@@ -530,6 +556,36 @@ export const AdminRooms = () => {
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 placeholder="Contoh: 350000"
                 className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <span>Tarif Ramadhan (IDR)</span>
+                <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-normal">🌙 Opsional</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={formData.price_ramadan}
+                onChange={(e) => setFormData({ ...formData, price_ramadan: e.target.value })}
+                placeholder="Kosongkan jika sama dg normal"
+                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <span>Tarif Tahun Baru (IDR)</span>
+                <span className="text-[10px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded font-normal">🎉 Opsional</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={formData.price_new_year}
+                onChange={(e) => setFormData({ ...formData, price_new_year: e.target.value })}
+                placeholder="Kosongkan jika sama dg normal"
+                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
               />
             </div>
 
@@ -680,6 +736,36 @@ export const AdminRooms = () => {
                 value={formData.price}
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <span>Tarif Ramadhan (IDR)</span>
+                <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-normal">🌙 Opsional</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={formData.price_ramadan}
+                onChange={(e) => setFormData({ ...formData, price_ramadan: e.target.value })}
+                placeholder="Kosongkan jika sama dg normal"
+                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <span>Tarif Tahun Baru (IDR)</span>
+                <span className="text-[10px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded font-normal">🎉 Opsional</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={formData.price_new_year}
+                onChange={(e) => setFormData({ ...formData, price_new_year: e.target.value })}
+                placeholder="Kosongkan jika sama dg normal"
+                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
               />
             </div>
 

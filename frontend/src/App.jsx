@@ -14,6 +14,7 @@ import { Transactions } from '@/pages/member/Transactions';
 import { Reservation } from '@/pages/member/Reservation';
 import { ContactUs } from '@/pages/member/ContactUs';
 import { Profile } from '@/pages/member/Profile';
+import { Notifications } from '@/pages/member/Notifications';
 
 // Auth Pages
 import { Login } from '@/pages/auth/Login';
@@ -151,6 +152,7 @@ export default function App() {
           <Route path="/reservation" element={<Reservation />} />
           <Route path="/contact-us" element={<ContactUs />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/notifications" element={<Notifications />} />
         </Route>
 
         {/* Auth Routes */}
