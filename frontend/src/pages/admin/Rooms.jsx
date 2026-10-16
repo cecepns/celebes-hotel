@@ -6,6 +6,8 @@ import { TableSkeleton } from '@/components/common/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Pagination } from '@/components/common/Pagination';
 import { Select } from '@/components/common/Select';
+import { SeasonalPricesModal } from '@/components/admin/SeasonalPricesModal';
+import { SeasonalPricesEditor } from '@/components/admin/SeasonalPricesEditor';
 import {
   Bed,
   Plus,
@@ -21,6 +23,9 @@ import {
   RefreshCw,
   ImageIcon,
   Upload,
+  Calendar,
+  Moon,
+  PartyPopper,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -41,7 +46,9 @@ export const AdminRooms = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [seasonalModalOpen, setSeasonalModalOpen] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(null);
+  const [seasonalRoom, setSeasonalRoom] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Form State
@@ -49,14 +56,13 @@ export const AdminRooms = () => {
     name: '',
     description: '',
     price: '',
-    price_ramadan: '',
-    price_new_year: '',
     capacity: 2,
     total_rooms: 10,
     facilities: '',
     is_active: 1,
     image: null,
     image_preview: null,
+    seasonal_prices: [],
   };
   const [formData, setFormData] = useState(initialFormState);
 
@@ -132,16 +138,40 @@ export const AdminRooms = () => {
       name: room.name || '',
       description: room.description || '',
       price: room.price || '',
-      price_ramadan: room.price_ramadan || '',
-      price_new_year: room.price_new_year || '',
       capacity: Number(room.capacity) || 2,
       total_rooms: Number(room.total_rooms) || 10,
       facilities: room.facilities || '',
       is_active: room.is_active ? 1 : 0,
       image: null,
       image_preview: room.image_url ? `${import.meta.env.VITE_API_URL?.replace('/api', '') || ''}${room.image_url}` : null,
+      seasonal_prices: room.seasonal_prices
+        ? room.seasonal_prices.map((sp) => ({
+            id: sp.id || null,
+            season_name: sp.season_name || '',
+            start_date: sp.start_date ? String(sp.start_date).split('T')[0] : '',
+            end_date: sp.end_date ? String(sp.end_date).split('T')[0] : '',
+            price: sp.price || '',
+          }))
+        : [],
     });
     setEditModalOpen(true);
+  };
+
+  // Open Dedicated Seasonal Prices Modal
+  const handleOpenSeasonalModal = (room) => {
+    setSeasonalRoom(room);
+    setSeasonalModalOpen(true);
+  };
+
+  const handleSeasonalSuccess = (updatedSeasonals) => {
+    if (seasonalRoom) {
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === seasonalRoom.id ? { ...r, seasonal_prices: updatedSeasonals } : r
+        )
+      );
+    }
+    fetchRooms(pagination.page, pagination.limit, search, statusFilter);
   };
 
   // Open Delete Modal
@@ -166,7 +196,7 @@ export const AdminRooms = () => {
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.price) {
-      toast.error('Nama tipe kamar dan tarif per malam wajib diisi');
+      toast.error('Nama tipe kamar dan tarif normal per malam wajib diisi');
       return;
     }
 
@@ -176,12 +206,11 @@ export const AdminRooms = () => {
       data.append('name', formData.name.trim());
       data.append('description', formData.description.trim());
       data.append('price', formData.price);
-      data.append('price_ramadan', formData.price_ramadan || '');
-      data.append('price_new_year', formData.price_new_year || '');
       data.append('capacity', formData.capacity);
       data.append('total_rooms', formData.total_rooms);
       data.append('facilities', formData.facilities.trim());
       data.append('is_active', formData.is_active);
+      data.append('seasonal_prices', JSON.stringify(formData.seasonal_prices || []));
       if (formData.image) {
         data.append('image', formData.image);
       }
@@ -206,7 +235,7 @@ export const AdminRooms = () => {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.price) {
-      toast.error('Nama tipe kamar dan tarif per malam wajib diisi');
+      toast.error('Nama tipe kamar dan tarif normal per malam wajib diisi');
       return;
     }
 
@@ -216,12 +245,11 @@ export const AdminRooms = () => {
       data.append('name', formData.name.trim());
       data.append('description', formData.description.trim());
       data.append('price', formData.price);
-      data.append('price_ramadan', formData.price_ramadan || '');
-      data.append('price_new_year', formData.price_new_year || '');
       data.append('capacity', formData.capacity);
       data.append('total_rooms', formData.total_rooms);
       data.append('facilities', formData.facilities.trim());
       data.append('is_active', formData.is_active);
+      data.append('seasonal_prices', JSON.stringify(formData.seasonal_prices || []));
       if (formData.image) {
         data.append('image', formData.image);
       }
@@ -286,10 +314,10 @@ export const AdminRooms = () => {
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
             <Bed className="h-6 w-6 text-red-600" />
-            Kelola Tipe Kamar
+            Kelola Tipe Kamar & Tarif
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Manajemen daftar kamar hotel, harga per malam, kapasitas tamu, dan fasilitas Hotel Celebes.
+            Manajemen daftar kamar hotel, harga normal, harga custom rentang tanggal (Ramadhan, Tahun Baru), dan fasilitas Hotel Celebes.
           </p>
         </div>
 
@@ -339,11 +367,11 @@ export const AdminRooms = () => {
       {/* Table Container */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs sm:text-sm min-w-[850px] whitespace-nowrap">
+          <table className="w-full text-left text-xs sm:text-sm min-w-[950px] whitespace-nowrap">
             <thead className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200/80 uppercase text-[11px] tracking-wider">
               <tr>
                 <th className="py-3 px-4">Tipe Kamar</th>
-                <th className="py-3 px-4">Tarif / Malam</th>
+                <th className="py-3 px-4">Tarif Kamar (Normal & Tanggal Khusus)</th>
                 <th className="py-3 px-4">Kapasitas</th>
                 <th className="py-3 px-4">Jumlah Unit</th>
                 <th className="py-3 px-4">Fasilitas</th>
@@ -367,6 +395,11 @@ export const AdminRooms = () => {
               ) : (
                 rooms.map((room) => {
                   const isActive = Boolean(room.is_active);
+                  const seasonals = room.seasonal_prices || [];
+
+                  // Current date check in YYYY-MM-DD
+                  const now = new Date();
+                  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
                   return (
                     <tr key={room.id} className="hover:bg-slate-50/60 transition">
@@ -395,30 +428,60 @@ export const AdminRooms = () => {
                         </div>
                       </td>
 
-                      {/* Price */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
+                      {/* Price (Normal + Date Ranges) */}
+                      <td className="py-3.5 px-4">
                         <div>
-                          <span className="font-extrabold text-slate-900">
+                          <span className="font-black text-slate-900 text-sm">
                             Rp {Number(room.price).toLocaleString('id-ID')}
                           </span>
-                          <span className="text-[10px] text-slate-400 ml-1">/ malam</span>
+                          <span className="text-[10px] text-slate-500 ml-1 font-semibold">/ malam (Normal)</span>
                         </div>
-                        <div className="flex flex-col gap-0.5 mt-1 text-[10px]">
-                          {room.price_ramadan ? (
-                            <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 inline-block w-fit">
-                              🌙 Ramadhan: Rp {Number(room.price_ramadan).toLocaleString('id-ID')}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 italic">🌙 Ramadhan: Normal</span>
-                          )}
-                          {room.price_new_year ? (
-                            <span className="text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 inline-block w-fit">
-                              🎉 Thn Baru: Rp {Number(room.price_new_year).toLocaleString('id-ID')}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 italic">🎉 Thn Baru: Normal</span>
-                          )}
-                        </div>
+
+                        {/* List of Custom Seasonal Date Ranges */}
+                        {seasonals.length > 0 ? (
+                          <div className="flex flex-col gap-1 mt-1.5 max-w-[320px]">
+                            {seasonals.map((sp, idx) => {
+                              const isToday = todayStr >= sp.start_date && todayStr <= sp.end_date;
+                              const isRamadan =
+                                sp.season_name.toLowerCase().includes('ramadan') ||
+                                sp.season_name.toLowerCase().includes('puasa');
+                              const isNewYear = sp.season_name.toLowerCase().includes('tahun baru');
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`text-[10px] px-2 py-0.5 rounded-lg border font-medium flex items-center justify-between gap-1.5 transition ${
+                                    isToday
+                                      ? 'bg-amber-100 text-amber-900 border-amber-300 ring-1 ring-amber-400/40'
+                                      : isRamadan
+                                      ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                                      : isNewYear
+                                      ? 'bg-purple-50 text-purple-900 border-purple-200'
+                                      : 'bg-slate-50 text-slate-700 border-slate-200'
+                                  }`}
+                                  title={`Berlaku dari ${sp.start_date} s/d ${sp.end_date}`}
+                                >
+                                  <div className="flex items-center gap-1 truncate">
+                                    <span>
+                                      {isRamadan ? '🌙' : isNewYear ? '🎉' : '📅'}
+                                    </span>
+                                    <span className="font-bold truncate">{sp.season_name}</span>
+                                    <span className="text-[9px] text-slate-500 shrink-0">
+                                      ({sp.start_date} ~ {sp.end_date})
+                                    </span>
+                                  </div>
+                                  <strong className="text-slate-900 shrink-0 font-bold">
+                                    Rp {Number(sp.price).toLocaleString('id-ID')}
+                                  </strong>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 italic mt-0.5 block">
+                            Hanya tarif normal (sepanjang tahun)
+                          </span>
+                        )}
                       </td>
 
                       {/* Capacity */}
@@ -486,14 +549,26 @@ export const AdminRooms = () => {
                       {/* Actions */}
                       <td className="py-3.5 px-4 whitespace-nowrap text-center">
                         <div className="flex items-center justify-center gap-1.5">
+                          {/* Dedicated Action: Manage Seasonal Date Ranges */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSeasonalModal(room)}
+                            className="p-1.5 rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 transition flex items-center gap-1"
+                            title="Atur Harga Rentang Tanggal (Ramadhan, Tahun Baru, Promo)"
+                          >
+                            <Calendar className="h-4 w-4 text-amber-600" />
+                            <span className="text-[11px] font-bold hidden lg:inline">Tarif Tanggal</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleOpenEdit(room)}
                             className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition"
-                            title="Edit Tipe Kamar"
+                            title="Edit Data Kamar"
                           >
                             <Edit2 className="h-4 w-4" />
                           </button>
+
                           <button
                             type="button"
                             onClick={() => handleOpenDelete(room)}
@@ -525,8 +600,8 @@ export const AdminRooms = () => {
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         title="Tambah Tipe Kamar Baru"
-        subtitle="Daftarkan tipe kamar baru untuk reservasi tamu hotel"
-        maxWidth="max-w-xl"
+        subtitle="Daftarkan tipe kamar baru beserta tarif normal dan harga khusus tanggal"
+        maxWidth="max-w-2xl"
       >
         <form onSubmit={handleCreateSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -545,8 +620,13 @@ export const AdminRooms = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Tarif / Malam (IDR) *
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span>Tarif Normal / Malam (IDR) *</span>
+                {formData.price && (
+                  <span className="text-red-600 font-extrabold text-xs">
+                    Rp {Number(formData.price).toLocaleString('id-ID')}
+                  </span>
+                )}
               </label>
               <input
                 type="number"
@@ -555,37 +635,7 @@ export const AdminRooms = () => {
                 value={formData.price}
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 placeholder="Contoh: 350000"
-                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <span>Tarif Ramadhan (IDR)</span>
-                <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-normal">🌙 Opsional</span>
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={formData.price_ramadan}
-                onChange={(e) => setFormData({ ...formData, price_ramadan: e.target.value })}
-                placeholder="Kosongkan jika sama dg normal"
-                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <span>Tarif Tahun Baru (IDR)</span>
-                <span className="text-[10px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded font-normal">🎉 Opsional</span>
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={formData.price_new_year}
-                onChange={(e) => setFormData({ ...formData, price_new_year: e.target.value })}
-                placeholder="Kosongkan jika sama dg normal"
-                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-semibold"
               />
             </div>
 
@@ -598,6 +648,15 @@ export const AdminRooms = () => {
                 value={formData.capacity}
                 onChange={(opt) => setFormData({ ...formData, capacity: Number(opt.value) })}
                 isSearchable={false}
+              />
+            </div>
+
+            {/* Custom Seasonal Date Ranges Editor */}
+            <div className="sm:col-span-2">
+              <SeasonalPricesEditor
+                items={formData.seasonal_prices || []}
+                onChange={(newItems) => setFormData({ ...formData, seasonal_prices: newItems })}
+                normalPrice={formData.price}
               />
             </div>
 
@@ -707,8 +766,8 @@ export const AdminRooms = () => {
         isOpen={editModalOpen}
         onClose={() => setEditModalOpen(false)}
         title="Edit Tipe Kamar"
-        subtitle={`Perbarui data ${selectedRoom?.name}`}
-        maxWidth="max-w-xl"
+        subtitle={`Perbarui data dan tarif ${selectedRoom?.name}`}
+        maxWidth="max-w-2xl"
       >
         <form onSubmit={handleEditSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -726,8 +785,13 @@ export const AdminRooms = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Tarif / Malam (IDR) *
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span>Tarif Normal / Malam (IDR) *</span>
+                {formData.price && (
+                  <span className="text-red-600 font-extrabold text-xs">
+                    Rp {Number(formData.price).toLocaleString('id-ID')}
+                  </span>
+                )}
               </label>
               <input
                 type="number"
@@ -735,37 +799,7 @@ export const AdminRooms = () => {
                 min="0"
                 value={formData.price}
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <span>Tarif Ramadhan (IDR)</span>
-                <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-normal">🌙 Opsional</span>
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={formData.price_ramadan}
-                onChange={(e) => setFormData({ ...formData, price_ramadan: e.target.value })}
-                placeholder="Kosongkan jika sama dg normal"
-                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <span>Tarif Tahun Baru (IDR)</span>
-                <span className="text-[10px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded font-normal">🎉 Opsional</span>
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={formData.price_new_year}
-                onChange={(e) => setFormData({ ...formData, price_new_year: e.target.value })}
-                placeholder="Kosongkan jika sama dg normal"
-                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-semibold"
               />
             </div>
 
@@ -778,6 +812,15 @@ export const AdminRooms = () => {
                 value={formData.capacity}
                 onChange={(opt) => setFormData({ ...formData, capacity: Number(opt.value) })}
                 isSearchable={false}
+              />
+            </div>
+
+            {/* Custom Seasonal Date Ranges Editor */}
+            <div className="sm:col-span-2">
+              <SeasonalPricesEditor
+                items={formData.seasonal_prices || []}
+                onChange={(newItems) => setFormData({ ...formData, seasonal_prices: newItems })}
+                normalPrice={formData.price}
               />
             </div>
 
@@ -880,6 +923,14 @@ export const AdminRooms = () => {
         </form>
       </Modal>
 
+      {/* Dedicated Quick Modal for Custom Date Range Seasonal Prices */}
+      <SeasonalPricesModal
+        isOpen={seasonalModalOpen}
+        onClose={() => setSeasonalModalOpen(false)}
+        room={seasonalRoom}
+        onSuccess={handleSeasonalSuccess}
+      />
+
       {/* Modal Confirm Delete */}
       <Modal
         isOpen={deleteModalOpen}
@@ -893,7 +944,7 @@ export const AdminRooms = () => {
             <div>
               <p className="font-bold">Apakah Anda yakin ingin menghapus tipe kamar ini?</p>
               <p className="mt-1 text-slate-600">
-                Tipe kamar <strong className="text-slate-900">{selectedRoom?.name}</strong> akan dihapus permanen dari daftar kamar hotel.
+                Tipe kamar <strong className="text-slate-900">{selectedRoom?.name}</strong> beserta seluruh riwayat tarif rentang tanggalnya akan dihapus permanen dari daftar kamar hotel.
               </p>
             </div>
           </div>
@@ -920,3 +971,4 @@ export const AdminRooms = () => {
     </div>
   );
 };
+export default AdminRooms;

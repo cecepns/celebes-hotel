@@ -166,6 +166,20 @@ const initSchemaUpdates = async () => {
       console.log('✅ Added price_new_year to rooms');
     }
 
+    // 6b. room_seasonal_prices table (Harga kamar custom berdasarkan rentang tanggal)
+    await pool.query(`CREATE TABLE IF NOT EXISTS room_seasonal_prices (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      room_id INT NOT NULL,
+      season_name VARCHAR(100) NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      price DECIMAL(15,2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+      INDEX idx_room_season (room_id, start_date, end_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    console.log('✅ Verified room_seasonal_prices table');
+
     // 7. notifications table (In-App Notifikasi Tamu)
     await pool.query(`CREATE TABLE IF NOT EXISTS notifications (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -1007,10 +1021,22 @@ app.get('/api/member/transactions', verifyToken, async (req, res) => {
   }
 });
 
-// Public Rooms List (Active only)
+// Public Rooms List (Active only with seasonal date range prices)
 app.get('/api/rooms', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM rooms WHERE is_active = 1 ORDER BY price ASC');
+    const roomIds = rows.map(r => r.id);
+    if (roomIds.length > 0) {
+      const [seasonals] = await pool.query(
+        "SELECT id, room_id, season_name, DATE_FORMAT(start_date, '%Y-%m-%d') as start_date, DATE_FORMAT(end_date, '%Y-%m-%d') as end_date, price, created_at FROM room_seasonal_prices WHERE room_id IN (?) ORDER BY start_date ASC",
+        [roomIds]
+      );
+      rows.forEach(r => {
+        r.seasonal_prices = seasonals.filter(s => s.room_id === r.id);
+      });
+    } else {
+      rows.forEach(r => { r.seasonal_prices = []; });
+    }
     res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -1027,30 +1053,41 @@ app.get('/api/closed-dates/public', async (req, res) => {
   }
 });
 
-// Helper: Calculate Reservation Pricing with Seasonal Rates (Ramadan & New Year)
+// Helper: Calculate Reservation Pricing with Custom Date Ranges & Seasonal Rates
 const calculateReservationPricing = async (roomType, checkIn, checkOut, numRooms = 1) => {
-  const [roomRows] = await pool.query('SELECT price, price_ramadan, price_new_year FROM rooms WHERE name = ?', [roomType]);
+  const [roomRows] = await pool.query('SELECT * FROM rooms WHERE name = ?', [roomType]);
   const room = roomRows.length > 0 ? roomRows[0] : null;
   const normalPrice = room ? parseFloat(room.price) : 350000;
-  const ramadanPrice = room && room.price_ramadan !== null && room.price_ramadan !== undefined && !isNaN(room.price_ramadan)
-    ? parseFloat(room.price_ramadan)
-    : normalPrice;
-  const newYearPrice = room && room.price_new_year !== null && room.price_new_year !== undefined && !isNaN(room.price_new_year)
-    ? parseFloat(room.price_new_year)
-    : normalPrice;
+
+  // Fetch custom seasonal prices for this room
+  let seasonalPrices = [];
+  if (room) {
+    const [spRows] = await pool.query(
+      "SELECT id, room_id, season_name, DATE_FORMAT(start_date, '%Y-%m-%d') as start_date, DATE_FORMAT(end_date, '%Y-%m-%d') as end_date, price, created_at FROM room_seasonal_prices WHERE room_id = ? ORDER BY start_date ASC",
+      [room.id]
+    );
+    seasonalPrices = spRows;
+  }
 
   const settings = await getSettingsMap();
   const ramadanStart = settings.ramadan_start_date ? String(settings.ramadan_start_date).split('T')[0] : null;
   const ramadanEnd = settings.ramadan_end_date ? String(settings.ramadan_end_date).split('T')[0] : null;
   const newYearDate = settings.new_year_date || '12-31';
 
-  let current = new Date(checkIn);
-  const end = new Date(checkOut);
+  const cleanCheckIn = String(checkIn).split('T')[0];
+  const cleanCheckOut = String(checkOut).split('T')[0];
+
+  let current = new Date(cleanCheckIn + 'T12:00:00');
+  const end = new Date(cleanCheckOut + 'T12:00:00');
+
   let nights = 0;
   let baseTotalPerRoom = 0;
   let ramadanNights = 0;
   let newYearNights = 0;
+  let customSeasonalNights = 0;
   let normalNights = 0;
+  let customSeasonalNames = new Set();
+  const dailyBreakdown = [];
 
   while (current < end) {
     nights++;
@@ -1060,16 +1097,43 @@ const calculateReservationPricing = async (roomType, checkIn, checkOut, numRooms
     const dateStr = `${yyyy}-${mm}-${dd}`;
     const monthDay = `${mm}-${dd}`;
 
-    if (monthDay === '12-31' || dateStr === newYearDate) {
-      baseTotalPerRoom += newYearPrice;
+    // 1. Check custom date range for this room first (Priority 1)
+    const matchedSeason = seasonalPrices.find(sp => {
+      const spStart = String(sp.start_date).split('T')[0];
+      const spEnd = String(sp.end_date).split('T')[0];
+      return dateStr >= spStart && dateStr <= spEnd;
+    });
+
+    if (matchedSeason) {
+      const spPrice = parseFloat(matchedSeason.price);
+      baseTotalPerRoom += spPrice;
+      customSeasonalNights++;
+      customSeasonalNames.add(matchedSeason.season_name);
+      if (matchedSeason.season_name.toLowerCase().includes('ramadan') || matchedSeason.season_name.toLowerCase().includes('puasa')) {
+        ramadanNights++;
+      } else if (matchedSeason.season_name.toLowerCase().includes('tahun baru')) {
+        newYearNights++;
+      }
+      dailyBreakdown.push({ date: dateStr, price: spPrice, name: matchedSeason.season_name, type: 'custom_seasonal' });
+    } else if (monthDay === '12-31' || dateStr === newYearDate) {
+      // 2. Fallback to New Year rate
+      const nyPrice = room && room.price_new_year ? parseFloat(room.price_new_year) : normalPrice;
+      baseTotalPerRoom += nyPrice;
       newYearNights++;
+      dailyBreakdown.push({ date: dateStr, price: nyPrice, name: 'Malam Tahun Baru', type: 'new_year' });
     } else if (ramadanStart && ramadanEnd && dateStr >= ramadanStart && dateStr <= ramadanEnd) {
-      baseTotalPerRoom += ramadanPrice;
+      // 3. Fallback to global Ramadan calendar range from settings
+      const ramPrice = room && room.price_ramadan ? parseFloat(room.price_ramadan) : normalPrice;
+      baseTotalPerRoom += ramPrice;
       ramadanNights++;
+      dailyBreakdown.push({ date: dateStr, price: ramPrice, name: 'Bulan Ramadhan', type: 'ramadan' });
     } else {
+      // 4. Normal regular rate
       baseTotalPerRoom += normalPrice;
       normalNights++;
+      dailyBreakdown.push({ date: dateStr, price: normalPrice, name: 'Tarif Reguler', type: 'normal' });
     }
+
     current.setDate(current.getDate() + 1);
   }
 
@@ -1088,13 +1152,14 @@ const calculateReservationPricing = async (roomType, checkIn, checkOut, numRooms
     normalNights,
     ramadanNights,
     newYearNights,
+    customSeasonalNights,
+    customSeasonalNames: Array.from(customSeasonalNames),
     normalPrice,
-    ramadanPrice,
-    newYearPrice,
     baseTotal,
     discountPercent,
     discountAmount,
     finalTotal,
+    dailyBreakdown,
     settings
   };
 };
@@ -3126,6 +3191,19 @@ app.get('/api/admin/rooms', verifyAdmin, async (req, res) => {
       [...params, parseInt(limit), parseInt(offset)]
     );
 
+    const roomIds = rows.map(r => r.id);
+    if (roomIds.length > 0) {
+      const [seasonals] = await pool.query(
+        "SELECT id, room_id, season_name, DATE_FORMAT(start_date, '%Y-%m-%d') as start_date, DATE_FORMAT(end_date, '%Y-%m-%d') as end_date, price, created_at FROM room_seasonal_prices WHERE room_id IN (?) ORDER BY start_date ASC",
+        [roomIds]
+      );
+      rows.forEach(r => {
+        r.seasonal_prices = seasonals.filter(s => s.room_id === r.id);
+      });
+    } else {
+      rows.forEach(r => { r.seasonal_prices = []; });
+    }
+
     res.json(formatPaginatedResponse(rows, page, limit, total));
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -3138,6 +3216,13 @@ app.get('/api/admin/rooms/:id', verifyAdmin, async (req, res) => {
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Tipe kamar tidak ditemukan' });
     }
+
+    const [seasonals] = await pool.query(
+      "SELECT id, room_id, season_name, DATE_FORMAT(start_date, '%Y-%m-%d') as start_date, DATE_FORMAT(end_date, '%Y-%m-%d') as end_date, price, created_at FROM room_seasonal_prices WHERE room_id = ? ORDER BY start_date ASC",
+      [req.params.id]
+    );
+    rows[0].seasonal_prices = seasonals;
+
     res.json({ success: true, data: rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -3146,7 +3231,7 @@ app.get('/api/admin/rooms/:id', verifyAdmin, async (req, res) => {
 
 app.post('/api/admin/rooms', verifyAdmin, upload.single('image'), async (req, res) => {
   try {
-    const { name, description, price, price_ramadan, price_new_year, capacity = 2, total_rooms = 10, facilities, is_active = 1 } = req.body;
+    const { name, description, price, price_ramadan, price_new_year, capacity = 2, total_rooms = 10, facilities, is_active = 1, seasonal_prices } = req.body;
     if (!name || !price) {
       return res.status(400).json({ success: false, message: 'Nama tipe kamar dan harga normal wajib diisi' });
     }
@@ -3160,6 +3245,33 @@ app.post('/api/admin/rooms', verifyAdmin, upload.single('image'), async (req, re
       [name, description || null, price, numPriceRamadan, numPriceNewYear, capacity || 2, total_rooms || 10, facilities || null, imageUrl, is_active == 1 || is_active === '1' ? 1 : 0]
     );
 
+    // Save seasonal prices if supplied
+    let spList = [];
+    if (seasonal_prices) {
+      try {
+        spList = typeof seasonal_prices === 'string' ? JSON.parse(seasonal_prices) : seasonal_prices;
+      } catch (e) {
+        spList = [];
+      }
+    }
+    if (Array.isArray(spList) && spList.length > 0) {
+      const validSp = spList
+        .filter(sp => sp.start_date && sp.end_date && sp.price && !isNaN(sp.price) && parseFloat(sp.price) > 0)
+        .map(sp => [
+          result.insertId,
+          sp.season_name?.trim() || 'Tarif Khusus',
+          sp.start_date,
+          sp.end_date,
+          parseFloat(sp.price)
+        ]);
+      if (validSp.length > 0) {
+        await pool.query(
+          'INSERT INTO room_seasonal_prices (room_id, season_name, start_date, end_date, price) VALUES ?',
+          [validSp]
+        );
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: 'Tipe kamar berhasil ditambahkan',
@@ -3172,7 +3284,7 @@ app.post('/api/admin/rooms', verifyAdmin, upload.single('image'), async (req, re
 
 app.put('/api/admin/rooms/:id', verifyAdmin, upload.single('image'), async (req, res) => {
   try {
-    const { name, description, price, price_ramadan, price_new_year, capacity, total_rooms, facilities, is_active } = req.body;
+    const { name, description, price, price_ramadan, price_new_year, capacity, total_rooms, facilities, is_active, seasonal_prices } = req.body;
     const roomId = req.params.id;
 
     const numPriceRamadan = price_ramadan && !isNaN(price_ramadan) && parseFloat(price_ramadan) > 0 ? parseFloat(price_ramadan) : null;
@@ -3199,7 +3311,97 @@ app.put('/api/admin/rooms/:id', verifyAdmin, upload.single('image'), async (req,
     params.push(roomId);
     await pool.query(`UPDATE rooms SET ${updates.join(', ')} WHERE id = ?`, params);
 
+    // Sync seasonal_prices if passed
+    if (seasonal_prices !== undefined) {
+      let spList = [];
+      try {
+        spList = typeof seasonal_prices === 'string' ? JSON.parse(seasonal_prices) : seasonal_prices;
+      } catch (e) {
+        spList = [];
+      }
+      await pool.query('DELETE FROM room_seasonal_prices WHERE room_id = ?', [roomId]);
+      if (Array.isArray(spList) && spList.length > 0) {
+        const validSp = spList
+          .filter(sp => sp.start_date && sp.end_date && sp.price && !isNaN(sp.price) && parseFloat(sp.price) > 0)
+          .map(sp => [
+            roomId,
+            sp.season_name?.trim() || 'Tarif Khusus',
+            sp.start_date,
+            sp.end_date,
+            parseFloat(sp.price)
+          ]);
+        if (validSp.length > 0) {
+          await pool.query(
+            'INSERT INTO room_seasonal_prices (room_id, season_name, start_date, end_date, price) VALUES ?',
+            [validSp]
+          );
+        }
+      }
+    }
+
     res.json({ success: true, message: 'Data tipe kamar berhasil diperbarui' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Dedicated Endpoint: Update Room Seasonal Prices (Rentang Tanggal Kustom)
+app.put('/api/admin/rooms/:id/seasonal-prices', verifyAdmin, async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const { seasonal_prices } = req.body;
+    if (!Array.isArray(seasonal_prices)) {
+      return res.status(400).json({ success: false, message: 'Format seasonal_prices harus berupa array' });
+    }
+
+    const [roomRows] = await pool.query('SELECT id, name FROM rooms WHERE id = ?', [roomId]);
+    if (roomRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Tipe kamar tidak ditemukan' });
+    }
+
+    // Validate entries
+    for (const sp of seasonal_prices) {
+      if (!sp.season_name?.trim()) {
+        return res.status(400).json({ success: false, message: 'Nama periode tanggal khusus wajib diisi' });
+      }
+      if (!sp.start_date || !sp.end_date) {
+        return res.status(400).json({ success: false, message: 'Tanggal mulai dan berakhir wajib diisi' });
+      }
+      if (sp.start_date > sp.end_date) {
+        return res.status(400).json({ success: false, message: `Tanggal mulai tidak boleh melebihi tanggal berakhir (${sp.season_name})` });
+      }
+      if (!sp.price || isNaN(sp.price) || parseFloat(sp.price) <= 0) {
+        return res.status(400).json({ success: false, message: `Tarif kamar untuk ${sp.season_name} harus lebih dari 0` });
+      }
+    }
+
+    // Replace all seasonal prices for this room
+    await pool.query('DELETE FROM room_seasonal_prices WHERE room_id = ?', [roomId]);
+
+    if (seasonal_prices.length > 0) {
+      const values = seasonal_prices.map(sp => [
+        roomId,
+        sp.season_name.trim(),
+        sp.start_date,
+        sp.end_date,
+        parseFloat(sp.price)
+      ]);
+      await pool.query(
+        'INSERT INTO room_seasonal_prices (room_id, season_name, start_date, end_date, price) VALUES ?',
+        [values]
+      );
+    }
+
+    const [updated] = await pool.query(
+      "SELECT id, room_id, season_name, DATE_FORMAT(start_date, '%Y-%m-%d') as start_date, DATE_FORMAT(end_date, '%Y-%m-%d') as end_date, price, created_at FROM room_seasonal_prices WHERE room_id = ? ORDER BY start_date ASC",
+      [roomId]
+    );
+
+    res.json({
+      success: true,
+      message: `Tarif tanggal khusus untuk kamar ${roomRows[0].name} berhasil disimpan`,
+      data: updated
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

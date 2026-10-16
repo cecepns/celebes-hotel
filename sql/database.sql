@@ -3,6 +3,7 @@
 -- Royalti Reward HCH (Hotel Celebes Hasanuddin)
 -- ==========================================================
 
+DROP TABLE IF EXISTS room_seasonal_prices;
 DROP TABLE IF EXISTS user_missions;
 DROP TABLE IF EXISTS reward_redemptions;
 DROP TABLE IF EXISTS point_ledger;
@@ -183,6 +184,21 @@ CREATE TABLE rooms (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------
+-- 9b. Tabel Room Seasonal Prices (Tarif Kamar Rentang Tanggal Kustom)
+-- ----------------------------------------------------------
+CREATE TABLE room_seasonal_prices (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  room_id INT NOT NULL,
+  season_name VARCHAR(100) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  price DECIMAL(15,2) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+  INDEX idx_room_season (room_id, start_date, end_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------
 -- 10. Tabel Reservations
 -- ----------------------------------------------------------
 CREATE TABLE reservations (
@@ -275,6 +291,13 @@ INSERT INTO rooms (id, name, description, price, capacity, total_rooms, faciliti
 (3, 'Family Room', 'Cocok untuk liburan keluarga dengan 2 queen bed & ruang santai.', 650000, 4, 8, '2 Queen Beds, AC, Smart TV, Wi-Fi, Living Area', 1),
 (4, 'Suite Room', 'Kamar suite elegan dengan living room terpisah, bathtub & sarapan gratis.', 850000, 2, 5, 'King Bed, Living Room, Bathtub, Free Breakfast', 1),
 (5, 'VIP Room', 'Kamar termewah Hotel Celebes dengan fasilitas VIP eksklusif.', 1100000, 2, 3, 'Executive Lounge, King Bed, Jacuzzi, VIP Amenities', 1);
+
+-- Seed Sample Seasonal Prices (Ramadhan 2027 & Tahun Baru)
+INSERT INTO room_seasonal_prices (room_id, season_name, start_date, end_date, price) VALUES
+(1, 'Bulan Ramadhan', '2027-02-18', '2027-03-20', 400000),
+(1, 'Malam Tahun Baru', '2026-12-31', '2026-12-31', 550000),
+(2, 'Bulan Ramadhan', '2027-02-18', '2027-03-20', 500000),
+(2, 'Malam Tahun Baru', '2026-12-31', '2026-12-31', 700000);
 
 -- Seed 16 Rewards from Excel Sheet 2
 INSERT INTO rewards (id, title, category, points_required, terms, stock, is_active) VALUES

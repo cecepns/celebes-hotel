@@ -69,12 +69,15 @@ const calculateSeasonalPricing = (roomObj, checkIn, checkOut, numRooms = 1, disc
       normalNights: 1,
       ramadanNights: 0,
       newYearNights: 0,
+      customSeasonalNights: 0,
+      customSeasonalNames: [],
       normalPrice: 350000,
       ramadanPrice: 350000,
       newYearPrice: 350000,
       baseSubtotal: 350000,
       discountAmount: 0,
       finalTotalPrice: 350000,
+      dailyBreakdown: [],
     };
   }
 
@@ -90,13 +93,22 @@ const calculateSeasonalPricing = (roomObj, checkIn, checkOut, numRooms = 1, disc
   const ramadanEnd = settings?.ramadan_end_date ? String(settings.ramadan_end_date).split('T')[0] : null;
   const newYearDate = settings?.new_year_date ? String(settings.new_year_date).split('T')[0] : '12-31';
 
-  let current = new Date(checkIn);
-  const end = new Date(checkOut);
+  const seasonalPrices = Array.isArray(roomObj.seasonal_prices) ? roomObj.seasonal_prices : [];
+
+  const cleanCheckIn = String(checkIn).split('T')[0];
+  const cleanCheckOut = String(checkOut).split('T')[0];
+
+  let current = new Date(cleanCheckIn + 'T12:00:00');
+  const end = new Date(cleanCheckOut + 'T12:00:00');
+
   let nights = 0;
   let baseTotalPerRoom = 0;
   let ramadanNights = 0;
   let newYearNights = 0;
+  let customSeasonalNights = 0;
   let normalNights = 0;
+  let customSeasonalNames = new Set();
+  const dailyBreakdown = [];
 
   while (current < end) {
     nights++;
@@ -106,15 +118,39 @@ const calculateSeasonalPricing = (roomObj, checkIn, checkOut, numRooms = 1, disc
     const dateStr = `${yyyy}-${mm}-${dd}`;
     const monthDay = `${mm}-${dd}`;
 
-    if (monthDay === '12-31' || dateStr === newYearDate) {
+    // 1. Priority 1: Custom date range for this room
+    const matchedSeason = seasonalPrices.find((sp) => {
+      const spStart = String(sp.start_date).split('T')[0];
+      const spEnd = String(sp.end_date).split('T')[0];
+      return dateStr >= spStart && dateStr <= spEnd;
+    });
+
+    if (matchedSeason) {
+      const spPrice = parseFloat(matchedSeason.price);
+      baseTotalPerRoom += spPrice;
+      customSeasonalNights++;
+      customSeasonalNames.add(matchedSeason.season_name);
+      if (
+        matchedSeason.season_name.toLowerCase().includes('ramadan') ||
+        matchedSeason.season_name.toLowerCase().includes('puasa')
+      ) {
+        ramadanNights++;
+      } else if (matchedSeason.season_name.toLowerCase().includes('tahun baru')) {
+        newYearNights++;
+      }
+      dailyBreakdown.push({ date: dateStr, price: spPrice, name: matchedSeason.season_name, type: 'custom_seasonal' });
+    } else if (monthDay === '12-31' || dateStr === newYearDate) {
       baseTotalPerRoom += newYearPrice;
       newYearNights++;
+      dailyBreakdown.push({ date: dateStr, price: newYearPrice, name: 'Malam Tahun Baru', type: 'new_year' });
     } else if (ramadanStart && ramadanEnd && dateStr >= ramadanStart && dateStr <= ramadanEnd) {
       baseTotalPerRoom += ramadanPrice;
       ramadanNights++;
+      dailyBreakdown.push({ date: dateStr, price: ramPrice, name: 'Bulan Ramadhan', type: 'ramadan' });
     } else {
       baseTotalPerRoom += normalPrice;
       normalNights++;
+      dailyBreakdown.push({ date: dateStr, price: normalPrice, name: 'Tarif Reguler', type: 'normal' });
     }
     current.setDate(current.getDate() + 1);
   }
@@ -130,12 +166,15 @@ const calculateSeasonalPricing = (roomObj, checkIn, checkOut, numRooms = 1, disc
     normalNights,
     ramadanNights,
     newYearNights,
+    customSeasonalNights,
+    customSeasonalNames: Array.from(customSeasonalNames),
     normalPrice,
     ramadanPrice,
     newYearPrice,
     baseSubtotal,
     discountAmount,
     finalTotalPrice,
+    dailyBreakdown,
   };
 };
 
@@ -734,7 +773,30 @@ export const Reservation = () => {
                           </div>
                         )}
 
-                        {(room.price_ramadan || room.price_new_year) && (
+                        {room.seasonal_prices && room.seasonal_prices.length > 0 ? (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-slate-100">
+                            {room.seasonal_prices.map((sp, idx) => {
+                              const isRamadan =
+                                sp.season_name.toLowerCase().includes('ramadan') ||
+                                sp.season_name.toLowerCase().includes('puasa');
+                              const isNewYear = sp.season_name.toLowerCase().includes('tahun baru');
+                              return (
+                                <span
+                                  key={idx}
+                                  className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 border ${
+                                    isRamadan
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200/80'
+                                      : isNewYear
+                                      ? 'bg-purple-50 text-purple-800 border-purple-200/80'
+                                      : 'bg-amber-50 text-amber-800 border-amber-200/80'
+                                  }`}
+                                >
+                                  {isRamadan ? '🌙' : isNewYear ? '🎉' : '📅'} {sp.season_name} ({sp.start_date} ~ {sp.end_date}): Rp {Number(sp.price).toLocaleString('id-ID')}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (room.price_ramadan || room.price_new_year) ? (
                           <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-slate-100">
                             {room.price_ramadan && (
                               <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1">
@@ -747,7 +809,7 @@ export const Reservation = () => {
                               </span>
                             )}
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
@@ -905,10 +967,10 @@ export const Reservation = () => {
                 </div>
 
                 {/* Seasonal Rates Breakdown if applicable */}
-                {(newBookingPricing.ramadanNights > 0 || newBookingPricing.newYearNights > 0) && (
+                {(newBookingPricing.customSeasonalNights > 0 || newBookingPricing.ramadanNights > 0 || newBookingPricing.newYearNights > 0) && (
                   <div className="p-2.5 rounded-lg bg-amber-50/80 border border-amber-200 text-[11px] space-y-1.5 text-slate-700">
                     <p className="font-bold text-amber-900 flex items-center gap-1">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-600" /> Rincian Tarif Berdasarkan Musim:
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" /> Rincian Tarif Berdasarkan Musim / Rentang Tanggal:
                     </p>
                     {newBookingPricing.normalNights > 0 && (
                       <div className="flex justify-between text-slate-600">
@@ -916,17 +978,37 @@ export const Reservation = () => {
                         <span>Rp {Number(newBookingPricing.normalPrice * newBookingPricing.normalNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
                       </div>
                     )}
-                    {newBookingPricing.ramadanNights > 0 && (
-                      <div className="flex justify-between text-amber-900 font-medium">
-                        <span>• 🌙 {newBookingPricing.ramadanNights} Malam Ramadhan (@ Rp {Number(newBookingPricing.ramadanPrice).toLocaleString('id-ID')})</span>
-                        <span>Rp {Number(newBookingPricing.ramadanPrice * newBookingPricing.ramadanNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
-                      </div>
-                    )}
-                    {newBookingPricing.newYearNights > 0 && (
-                      <div className="flex justify-between text-purple-900 font-medium">
-                        <span>• 🎉 {newBookingPricing.newYearNights} Malam Tahun Baru (@ Rp {Number(newBookingPricing.newYearPrice).toLocaleString('id-ID')})</span>
-                        <span>Rp {Number(newBookingPricing.newYearPrice * newBookingPricing.newYearNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
-                      </div>
+                    {newBookingPricing.dailyBreakdown && newBookingPricing.dailyBreakdown.filter(d => d.type === 'custom_seasonal').length > 0 ? (
+                      newBookingPricing.customSeasonalNames.map((name, sIdx) => {
+                        const itemsOfThisSeason = newBookingPricing.dailyBreakdown.filter(d => d.type === 'custom_seasonal' && d.name === name);
+                        const count = itemsOfThisSeason.length;
+                        const unitPrice = itemsOfThisSeason[0]?.price || 0;
+                        const sub = unitPrice * count * (parseInt(formData.num_rooms) || 1);
+                        const isRamadan = name.toLowerCase().includes('ramadan') || name.toLowerCase().includes('puasa');
+                        const isNewYear = name.toLowerCase().includes('tahun baru');
+
+                        return (
+                          <div key={sIdx} className={`flex justify-between font-medium ${isRamadan ? 'text-emerald-900' : isNewYear ? 'text-purple-900' : 'text-amber-900'}`}>
+                            <span>• {isRamadan ? '🌙' : isNewYear ? '🎉' : '✨'} {count} Malam {name} (@ Rp {Number(unitPrice).toLocaleString('id-ID')})</span>
+                            <span>Rp {Number(sub).toLocaleString('id-ID')}</span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <>
+                        {newBookingPricing.ramadanNights > 0 && (
+                          <div className="flex justify-between text-amber-900 font-medium">
+                            <span>• 🌙 {newBookingPricing.ramadanNights} Malam Ramadhan (@ Rp {Number(newBookingPricing.ramadanPrice).toLocaleString('id-ID')})</span>
+                            <span>Rp {Number(newBookingPricing.ramadanPrice * newBookingPricing.ramadanNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
+                          </div>
+                        )}
+                        {newBookingPricing.newYearNights > 0 && (
+                          <div className="flex justify-between text-purple-900 font-medium">
+                            <span>• 🎉 {newBookingPricing.newYearNights} Malam Tahun Baru (@ Rp {Number(newBookingPricing.newYearPrice).toLocaleString('id-ID')})</span>
+                            <span>Rp {Number(newBookingPricing.newYearPrice * newBookingPricing.newYearNights * (parseInt(formData.num_rooms) || 1)).toLocaleString('id-ID')}</span>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

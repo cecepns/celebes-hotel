@@ -108,6 +108,7 @@ export const API_ENDPOINTS = {
       DETAIL: (id) => `/admin/rooms/${id}`,
       UPDATE: (id) => `/admin/rooms/${id}`,
       DELETE: (id) => `/admin/rooms/${id}`,
+      SEASONAL_PRICES: (id) => `/admin/rooms/${id}/seasonal-prices`,
     },
     SETTINGS: {
       GET: '/admin/settings',
