@@ -556,6 +556,10 @@ export const Reservation = () => {
   const handleChatReceptionist = (r) => {
     const waNumber = hotelSettings.whatsapp_number || '6282189001285';
     const discountText = r.discount_percent > 0 ? ` (Hemat Diskon ${r.discount_percent}%)` : '';
+    const bankName = hotelSettings.payment_bank_name || 'Bank Mandiri';
+    const bankAccount = hotelSettings.payment_bank_account || '1520511027878';
+    const accountName = hotelSettings.payment_account_name || 'JIMMY EDENTON';
+
     const waText = encodeURIComponent(
       `Halo Resepsionis Hotel Celebes Hasanuddin,\nSaya ingin konfirmasi status reservasi kamar saya:\n` +
       `- ID Booking: #HCH-${r.id}\n` +
@@ -565,7 +569,8 @@ export const Reservation = () => {
       `- Check-Out: ${formatDateID(r.check_out)}\n` +
       `- Total Pelunasan: Rp ${Number(r.total_price || 0).toLocaleString('id-ID')}${discountText}\n` +
       `- Status: ${r.status?.toUpperCase()}\n\n` +
-      `Mohon informasinya mengenai ketersediaan dan nomor rekening/QRIS untuk pelunasan cashless. Terima kasih!`
+      `Saya akan melakukan pelunasan cashless via transfer ke ${bankName}:  ${bankAccount} a/n ${accountName}.\n` +
+      `Mohon informasinya mengenai ketersediaan kamar. Terima kasih!`
     );
     window.open(`https://wa.me/${waNumber}?text=${waText}`, '_blank');
   };
@@ -1033,30 +1038,44 @@ export const Reservation = () => {
                 </div>
               </div>
 
-              {/* Rekening Transfer Bank Resmi Hotel */}
-              <div className="p-3 bg-emerald-50 border border-emerald-200/90 rounded-xl space-y-1.5 text-xs">
-                <div className="flex items-center justify-between font-bold text-emerald-950 pb-1 border-b border-emerald-200">
+              {/* Rekening Transfer Bank Resmi Hotel & Ketentuan Konfirmasi */}
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200/90 rounded-2xl space-y-2.5 text-xs shadow-xs">
+                <div className="flex items-center justify-between font-bold text-emerald-950 pb-1.5 border-b border-emerald-200">
                   <span className="flex items-center gap-1.5">
                     <CreditCard className="w-4 h-4 text-emerald-600" />
-                    <span>Rekening Transfer Resmi Hotel</span>
+                    <span>Konfirmasi Rekening Resmi Pelunasan Cashless</span>
                   </span>
                   <span className="text-[10px] bg-emerald-600 text-white font-semibold px-2 py-0.5 rounded-full">
-                    {hotelSettings.payment_bank_name || 'Bank BCA'}
+                    {hotelSettings.payment_bank_name || 'Bank Mandiri'}
                   </span>
                 </div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-0.5">
                   <div>
                     <span className="text-[11px] text-emerald-800">Nomor Rekening:</span>
                     <span className="font-mono font-black text-sm text-emerald-950 ml-1.5 select-all">
-                      {hotelSettings.payment_bank_account || '123-456-7890'}
+                      {hotelSettings.payment_bank_account || '1520511027878'}
                     </span>
                   </div>
-                  <div className="text-[11px] text-emerald-800 font-medium">
-                    a/n {hotelSettings.payment_account_name || 'Hotel Celebes Hasanuddin'}
+                  <div className="text-[11px] text-emerald-800 font-semibold">
+                    a/n {hotelSettings.payment_account_name || 'JIMMY EDENTON'}
                   </div>
                 </div>
-                <p className="text-[10px] text-emerald-700/80 leading-relaxed pt-1">
-                  Setelah booking dikirim, Anda dapat mengunggah bukti transfer bank di tab <strong>"Reservasi Saya"</strong> untuk verifikasi instan staf kami.
+
+                {/* Catatan Konfirmasi & Deposit Kunci */}
+                <div className="p-2.5 bg-white/90 rounded-xl border border-emerald-200/80 text-[11px] space-y-1.5 leading-relaxed text-slate-800">
+                  <p className="font-bold text-emerald-950">
+                    Untuk mengonfirmasi dan mengamankan kamar Anda, mohon lakukan pelunasan cashless via transfer sebelum check-in ke rekening resmi kami di atas.
+                  </p>
+                  <p className="text-amber-900 bg-amber-50 p-2 rounded-lg border border-amber-200/80 font-medium text-[10.5px]">
+                    ⚠️ Pada saat Check-in Bapak / Ibu akan dimintakan uang Deposit dan Jaminan Kunci kamar, dan dana akan dikembalikan pada saat Check-out.
+                  </p>
+                  <p className="text-emerald-700 font-bold text-center pt-0.5">
+                    Terima kasih sudah memilih kami dan kepercayaannya !
+                  </p>
+                </div>
+
+                <p className="text-[10px] text-emerald-700/80 leading-relaxed">
+                  Setelah booking dikirim, Anda dapat mengunggah bukti transfer bank di tab <strong>"Reservasi Saya"</strong> untuk verifikasi instan tim kami.
                 </p>
               </div>
 
@@ -1443,8 +1462,13 @@ export const Reservation = () => {
                 Rp {Number(selectedReservationForProof?.total_price || 0).toLocaleString('id-ID')}
               </span>
             </div>
-            <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-600">
-              Transfer ke: <strong>{hotelSettings.payment_bank_name || 'Bank BCA'}</strong> • {hotelSettings.payment_bank_account || '123-456-7890'} (a/n {hotelSettings.payment_account_name || 'Hotel Celebes Hasanuddin'})
+            <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-700 space-y-1">
+              <div>
+                Transfer ke: <strong>{hotelSettings.payment_bank_name || 'Bank Mandiri'}</strong> • <span className="font-mono font-bold select-all">{hotelSettings.payment_bank_account || '1520511027878'}</span> (a/n {hotelSettings.payment_account_name || 'JIMMY EDENTON'})
+              </div>
+              <p className="text-[10px] text-amber-800 bg-amber-50 p-1.5 rounded-lg border border-amber-200">
+                Deposit & Jaminan Kunci kamar dimintakan saat Check-in dan akan dikembalikan saat Check-out.
+              </p>
             </div>
           </div>
 

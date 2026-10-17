@@ -24,6 +24,7 @@ import {
   Building2,
   Bell,
 } from 'lucide-react';
+import { AnnouncementFeed } from '@/components/common/AnnouncementFeed';
 
 export const Home = () => {
   const { user, isAuthenticated } = useAuth();
@@ -194,6 +195,9 @@ export const Home = () => {
             </Link>
           </div>
         )}
+
+        {/* Broadcast Pengumuman Resmi Hotel (Aktif dari Admin Panel) */}
+        <AnnouncementFeed />
 
         {/* ============================================================== */}
         {/* POINT CARD CONTAINER (Exact Visual Reproduction from Flyer)     */}

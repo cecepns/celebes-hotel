@@ -194,19 +194,38 @@ const initSchemaUpdates = async () => {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
     console.log('✅ Verified notifications table');
 
-    // 8. Ensure essential seasonal & bank settings exist
+    // 8. announcements table (Fitur Pengumuman Global)
+    await pool.query(`CREATE TABLE IF NOT EXISTS announcements (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      content TEXT NOT NULL,
+      type ENUM('info', 'promo', 'warning', 'urgent') DEFAULT 'info',
+      badge VARCHAR(50) DEFAULT NULL,
+      link_url VARCHAR(255) DEFAULT NULL,
+      link_text VARCHAR(100) DEFAULT NULL,
+      is_active TINYINT(1) DEFAULT 1,
+      start_date DATE NULL,
+      end_date DATE NULL,
+      created_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_active (is_active, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    console.log('✅ Verified announcements table');
+
+    // 9. Ensure essential seasonal & bank settings exist (Official Bank Mandiri)
     const defaultSettings = [
       ['ramadan_start_date', '2027-02-18', 'Tanggal Mulai Periode Ramadhan (Puasa)'],
       ['ramadan_end_date', '2027-03-20', 'Tanggal Akhir Periode Ramadhan (Lebaran)'],
       ['new_year_date', '12-31', 'Tanggal Malam Tahun Baru (MM-DD)'],
-      ['payment_bank_name', 'Bank BCA', 'Nama Bank Pembayaran Reservasi'],
-      ['payment_bank_account', '123-456-7890', 'Nomor Rekening Bank Pembayaran'],
-      ['payment_account_name', 'Hotel Celebes Hasanuddin', 'Nama Pemilik Rekening'],
+      ['payment_bank_name', 'Bank Mandiri', 'Nama Bank Pembayaran Reservasi'],
+      ['payment_bank_account', '1520511027878', 'Nomor Rekening Bank Pembayaran'],
+      ['payment_account_name', 'JIMMY EDENTON', 'Nama Pemilik Rekening'],
     ];
 
     for (const [key, val, desc] of defaultSettings) {
       await pool.query(
-        'INSERT IGNORE INTO settings (setting_key, setting_value, description) VALUES (?, ?, ?)',
+        'INSERT INTO settings (setting_key, setting_value, description) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE setting_value = IF(setting_key LIKE "payment%", VALUES(setting_value), setting_value)',
         [key, val, desc]
       );
     }
@@ -380,6 +399,23 @@ app.get('/api/settings/public', async (req, res) => {
   try {
     const settings = await getSettingsMap();
     res.json({ success: true, data: settings });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Public Active Announcements (Broadcast ke semua user / member / tamu)
+app.get('/api/announcements/public', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, title, content, type, badge, link_url, link_text, is_active, created_at 
+       FROM announcements 
+       WHERE is_active = 1 
+         AND (start_date IS NULL OR start_date <= CURDATE()) 
+         AND (end_date IS NULL OR end_date >= CURDATE())
+       ORDER BY id DESC LIMIT 10`
+    );
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -3411,6 +3447,172 @@ app.delete('/api/admin/rooms/:id', verifyAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM rooms WHERE id = ?', [req.params.id]);
     res.json({ success: true, message: 'Tipe kamar berhasil dihapus' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ==========================================
+// Admin Announcements (Fitur Pengumuman Global)
+// ==========================================
+app.get('/api/admin/announcements', verifyAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', status = 'all' } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+
+    if (search && search.trim()) {
+      whereClause += ' AND (title LIKE ? OR content LIKE ? OR badge LIKE ?)';
+      const s = `%${search.trim()}%`;
+      params.push(s, s, s);
+    }
+
+    if (status === 'active') {
+      whereClause += ' AND is_active = 1';
+    } else if (status === 'inactive') {
+      whereClause += ' AND is_active = 0';
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) as total FROM announcements ${whereClause}`,
+      params
+    );
+    const total = countRows[0].total;
+
+    const [rows] = await pool.query(
+      `SELECT * FROM announcements ${whereClause} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), offset]
+    );
+
+    res.json(formatPaginatedResponse(rows, page, limit, total));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/admin/announcements', verifyStaffOrAdmin, async (req, res) => {
+  try {
+    const {
+      title,
+      content,
+      type = 'info',
+      badge = '',
+      link_url = '',
+      link_text = '',
+      is_active = 1,
+      start_date = null,
+      end_date = null,
+    } = req.body;
+
+    if (!title || !title.trim() || !content || !content.trim()) {
+      return res.status(400).json({ success: false, message: 'Judul dan isi pengumuman wajib diisi' });
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO announcements (title, content, type, badge, link_url, link_text, is_active, start_date, end_date, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        title.trim(),
+        content.trim(),
+        type || 'info',
+        badge ? badge.trim() : null,
+        link_url ? link_url.trim() : null,
+        link_text ? link_text.trim() : null,
+        is_active ? 1 : 0,
+        start_date || null,
+        end_date || null,
+        req.user?.id || null,
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Pengumuman baru berhasil diterbitkan!',
+      data: { id: result.insertId },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/admin/announcements/:id', verifyStaffOrAdmin, async (req, res) => {
+  try {
+    const {
+      title,
+      content,
+      type = 'info',
+      badge = '',
+      link_url = '',
+      link_text = '',
+      is_active = 1,
+      start_date = null,
+      end_date = null,
+    } = req.body;
+
+    if (!title || !title.trim() || !content || !content.trim()) {
+      return res.status(400).json({ success: false, message: 'Judul dan isi pengumuman wajib diisi' });
+    }
+
+    await pool.query(
+      `UPDATE announcements SET 
+         title = ?, 
+         content = ?, 
+         type = ?, 
+         badge = ?, 
+         link_url = ?, 
+         link_text = ?, 
+         is_active = ?, 
+         start_date = ?, 
+         end_date = ?
+       WHERE id = ?`,
+      [
+        title.trim(),
+        content.trim(),
+        type || 'info',
+        badge ? badge.trim() : null,
+        link_url ? link_url.trim() : null,
+        link_text ? link_text.trim() : null,
+        is_active ? 1 : 0,
+        start_date || null,
+        end_date || null,
+        req.params.id,
+      ]
+    );
+
+    res.json({ success: true, message: 'Pengumuman berhasil diperbarui!' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/admin/announcements/:id/toggle', verifyStaffOrAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT is_active, title FROM announcements WHERE id = ?', [req.params.id]);
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: 'Pengumuman tidak ditemukan' });
+    }
+
+    const nextState = rows[0].is_active ? 0 : 1;
+    await pool.query('UPDATE announcements SET is_active = ? WHERE id = ?', [nextState, req.params.id]);
+
+    res.json({
+      success: true,
+      message: nextState
+        ? `Pengumuman "${rows[0].title}" telah diaktifkan dan akan tampil ke user.`
+        : `Pengumuman "${rows[0].title}" telah dinonaktifkan.`,
+      data: { is_active: nextState },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/admin/announcements/:id', verifyStaffOrAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM announcements WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Pengumuman berhasil dihapus' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

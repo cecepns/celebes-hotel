@@ -3,6 +3,10 @@ export const API_ENDPOINTS = {
     SETTINGS: '/settings/public',
     ROOMS: '/rooms',
     CLOSED_DATES: '/closed-dates/public',
+    ANNOUNCEMENTS: '/announcements/public',
+  },
+  ANNOUNCEMENTS: {
+    PUBLIC: '/announcements/public',
   },
   SETTINGS: {
     PUBLIC: '/settings/public',
@@ -109,6 +113,13 @@ export const API_ENDPOINTS = {
       UPDATE: (id) => `/admin/rooms/${id}`,
       DELETE: (id) => `/admin/rooms/${id}`,
       SEASONAL_PRICES: (id) => `/admin/rooms/${id}/seasonal-prices`,
+    },
+    ANNOUNCEMENTS: {
+      LIST: '/admin/announcements',
+      CREATE: '/admin/announcements',
+      UPDATE: (id) => `/admin/announcements/${id}`,
+      TOGGLE: (id) => `/admin/announcements/${id}/toggle`,
+      DELETE: (id) => `/admin/announcements/${id}`,
     },
     SETTINGS: {
       GET: '/admin/settings',

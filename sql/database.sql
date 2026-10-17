@@ -252,6 +252,26 @@ CREATE TABLE notifications (
   INDEX idx_user_notif (user_id, is_read, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ----------------------------------------------------------
+-- 13. Tabel Announcements (Fitur Pengumuman Global)
+-- ----------------------------------------------------------
+CREATE TABLE announcements (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  type ENUM('info', 'promo', 'warning', 'urgent') DEFAULT 'info',
+  badge VARCHAR(50) DEFAULT NULL,
+  link_url VARCHAR(255) DEFAULT NULL,
+  link_text VARCHAR(100) DEFAULT NULL,
+  is_active TINYINT(1) DEFAULT 1,
+  start_date DATE NULL,
+  end_date DATE NULL,
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_active (is_active, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ==========================================================
 -- SEED DATA
 -- ==========================================================
@@ -269,12 +289,16 @@ INSERT INTO settings (setting_key, setting_value, description) VALUES
 ('hotel_phone', '+62411 3620770', 'Nomor Telepon Kantor'),
 ('instagram_username', 'celebeshtl', 'Akun Instagram'),
 ('hch_member_discount_percent', '10', 'Persentase diskon reservasi kamar via aplikasi HCH (%)'),
-('payment_bank_name', 'Bank BCA', 'Nama Bank Pembayaran Reservasi'),
-('payment_bank_account', '123-456-7890', 'Nomor Rekening Bank Pembayaran'),
-('payment_account_name', 'Hotel Celebes Hasanuddin', 'Nama Pemilik Rekening'),
+('payment_bank_name', 'Bank Mandiri', 'Nama Bank Pembayaran Reservasi'),
+('payment_bank_account', '1520511027878', 'Nomor Rekening Bank Pembayaran'),
+('payment_account_name', 'JIMMY EDENTON', 'Nama Pemilik Rekening'),
 ('ramadan_start_date', '2027-02-18', 'Tanggal Mulai Periode Ramadhan (Puasa)'),
 ('ramadan_end_date', '2027-03-20', 'Tanggal Akhir Periode Ramadhan (Lebaran)'),
 ('new_year_date', '12-31', 'Tanggal Malam Tahun Baru (MM-DD)');
+
+-- Announcements Seed
+INSERT INTO announcements (id, title, content, type, badge, link_url, link_text, is_active) VALUES
+(1, 'Selamat Datang di Layanan Royalti Reward HCH', 'Dapatkan keuntungan diskon kamar khusus pengguna aplikasi, perolehan poin setiap menginap, serta penukaran berbagai voucher reward menarik di Hotel Celebes Hasanuddin Makassar.', 'promo', 'Info Penting', '/reservation', 'Pesan Kamar Sekarang', 1);
 
 -- Users (admin: admin / admin123, supervisor: supervisor / admin123, resepsionis: reception / admin123, member demo: rosdiana / 123456)
 INSERT INTO users (id, name, phone, email, password, role, member_code, total_points, created_at) VALUES

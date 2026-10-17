@@ -32,6 +32,7 @@ import { AdminReservations } from '@/pages/admin/Reservations';
 import { AdminSettings } from '@/pages/admin/Settings';
 import { AdminUsers } from '@/pages/admin/Users';
 import { AdminRooms } from '@/pages/admin/Rooms';
+import { AdminAnnouncements } from '@/pages/admin/Announcements';
 
 // Member Shell Layout with Auth Guard (Redirects to /login if unauthenticated)
 const ProtectedMemberRoute = () => {
@@ -164,6 +165,7 @@ export default function App() {
           <Route index element={<AdminDashboard />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="members" element={<AdminMembers />} />
+          <Route path="announcements" element={<AdminAnnouncements />} />
           <Route path="rooms" element={<AdminRooms />} />
           <Route path="transactions" element={<AdminTransactions />} />
           <Route path="rewards" element={<AdminRewards />} />

@@ -35,9 +35,9 @@ export const AdminSettings = () => {
     hotel_address: 'Jl. Sultan Hasanuddin No. 2 Makassar',
     hotel_phone: '+62411 3620770',
     instagram_username: 'celebeshtl',
-    payment_bank_name: 'Bank BCA',
-    payment_bank_account: '123-456-7890',
-    payment_account_name: 'Hotel Celebes Hasanuddin',
+    payment_bank_name: 'Bank Mandiri',
+    payment_bank_account: '1520511027878',
+    payment_account_name: 'JIMMY EDENTON',
     ramadan_start_date: '2026-02-18',
     ramadan_end_date: '2026-03-20',
     new_year_date: '2026-12-31',
@@ -577,13 +577,18 @@ export const AdminSettings = () => {
             </div>
           </div>
 
-          <div className="p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl text-xs text-emerald-950">
+          <div className="p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl text-xs text-emerald-950 space-y-2">
             <span className="font-extrabold flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              Pratinjau Teks Rekening di WhatsApp:
+              Pratinjau Format Pesan Konfirmasi Reservasi di WhatsApp:
             </span>
-            <div className="mt-1.5 font-mono text-xs bg-white p-2.5 rounded-lg border border-emerald-200 text-slate-800 shadow-2xs">
-              {settings.payment_bank_name || 'Bank BCA'}: {settings.payment_bank_account || '123-456-7890'} a/n {settings.payment_account_name || 'Hotel Celebes Hasanuddin'}
+            <div className="font-mono text-[11px] bg-white p-3 rounded-lg border border-emerald-200 text-slate-800 shadow-2xs whitespace-pre-line leading-relaxed">
+              {`Untuk mengonfirmasi dan mengamankan kamar Anda, mohon lakukan pelunasan cashless via transfer sebelum check-in ke rekening resmi kami:
+${settings.payment_bank_name || 'Bank Mandiri'}:  ${settings.payment_bank_account || '1520511027878'} a/n ${settings.payment_account_name || 'JIMMY EDENTON'}
+
+Pada saat Chek-in Bapak /Ibu akan di mintakan uang Deposit dan Jaminan Kunci kamar dan dana akan di kembalikan pada saat Chek out 
+
+Terima kasih sudah memiliih kami dan kepercayaannya !`}
             </div>
           </div>
         </div>

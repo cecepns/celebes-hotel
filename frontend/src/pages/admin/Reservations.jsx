@@ -76,9 +76,9 @@ export const AdminReservations = () => {
 
   // Cashless Bank Account Settings for WhatsApp Draft
   const [bankSettings, setBankSettings] = useState({
-    payment_bank_name: 'Bank BCA',
-    payment_bank_account: '123-456-7890',
-    payment_account_name: 'Hotel Celebes Hasanuddin',
+    payment_bank_name: 'Bank Mandiri',
+    payment_bank_account: '1520511027878',
+    payment_account_name: 'JIMMY EDENTON',
   });
 
   // Helper format DD-MM-YYYY (e.g. 20-11-2026)
@@ -176,9 +176,9 @@ export const AdminReservations = () => {
           setDiscountPercent(String(res.data.hch_member_discount_percent));
         }
         setBankSettings({
-          payment_bank_name: res.data.payment_bank_name || 'Bank BCA',
-          payment_bank_account: res.data.payment_bank_account || '123-456-7890',
-          payment_account_name: res.data.payment_account_name || 'Hotel Celebes Hasanuddin',
+          payment_bank_name: res.data.payment_bank_name || 'Bank Mandiri',
+          payment_bank_account: res.data.payment_bank_account || '1520511027878',
+          payment_account_name: res.data.payment_account_name || 'JIMMY EDENTON',
         });
       }
     }).catch(() => {});
@@ -310,7 +310,9 @@ export const AdminReservations = () => {
     const discountText = r.discount_percent > 0 ? ` (Sudah termasuk Diskon Member HCH ${r.discount_percent}%)` : '';
     const checkInFormatted = formatDateDMY(r.check_in);
     const checkOutFormatted = formatDateDMY(r.check_out);
-    const bankText = `${bankSettings.payment_bank_name || 'Bank BCA'}: ${bankSettings.payment_bank_account || '123-456-7890'} a/n ${bankSettings.payment_account_name || 'Hotel Celebes Hasanuddin'}`;
+    const bankName = bankSettings.payment_bank_name || 'Bank Mandiri';
+    const bankAccount = bankSettings.payment_bank_account || '1520511027878';
+    const accountName = bankSettings.payment_account_name || 'JIMMY EDENTON';
 
     const text = encodeURIComponent(
       `Halo ${r.guest_name},\n` +
@@ -320,8 +322,9 @@ export const AdminReservations = () => {
       `- Jumlah Tamu: ${r.num_guests}\n` +
       `- Total Pembayaran Cashless: ${priceText}${discountText}\n\n` +
       `Untuk mengonfirmasi dan mengamankan kamar Anda, mohon lakukan pelunasan cashless via transfer sebelum check-in ke rekening resmi kami:\n` +
-      `${bankText}\n\n` +
-      `Terima kasih atas kepercayaannya!`
+      `${bankName}:  ${bankAccount} a/n ${accountName}\n\n` +
+      `Pada saat Chek-in Bapak /Ibu akan di mintakan uang Deposit dan Jaminan Kunci kamar dan dana akan di kembalikan pada saat Chek out \n\n` +
+      `Terima kasih sudah memiliih kami dan kepercayaannya !`
     );
     window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
   };
