@@ -103,6 +103,7 @@ export const AdminTransactions = () => {
     { value: 'fnb', label: 'F&B Restoran' },
     { value: 'drugstore', label: 'Drugstore' },
     { value: 'laundry', label: 'Laundry' },
+    { value: 'koreksi', label: 'Koreksi Poin (+ / -)' },
     { value: 'lainnya', label: 'Lainnya' },
   ];
 
@@ -589,15 +590,30 @@ export const AdminTransactions = () => {
                       </div>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
-                        {t.category}
-                      </span>
+                      {t.category === 'koreksi' ? (
+                        <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-purple-100 text-purple-800 border border-purple-200">
+                          Koreksi Poin
+                        </span>
+                      ) : (
+                        <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
+                          {t.category}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 font-bold text-slate-800 whitespace-nowrap">
-                      Rp {Number(t.amount).toLocaleString('id-ID')}
+                      {t.category === 'koreksi' ? (
+                        <span className="text-xs text-slate-500 font-normal italic">Koreksi Saldo</span>
+                      ) : (
+                        `Rp ${Number(t.amount).toLocaleString('id-ID')}`
+                      )}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      {t.status === 'pending' ? (
+                      {t.points_earned < 0 ? (
+                        <span className="inline-flex items-center gap-1 font-extrabold text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-lg text-xs">
+                          <MinusCircle className="w-3.5 h-3.5 text-rose-500" />
+                          {t.points_earned} pts
+                        </span>
+                      ) : t.status === 'pending' ? (
                         <span className="inline-flex items-center gap-1 font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-lg text-xs">
                           <Coins className="w-3.5 h-3.5 text-amber-500" />
                           +{t.points_earned} pts (Tertunda)
@@ -659,11 +675,11 @@ export const AdminTransactions = () => {
                       })}
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
-                      {/* Actions according to matrix:
-                          Receptionist: Cannot edit, cannot reversal
-                          Supervisor: Can approve/reject, edit, reversal
-                          Admin: Full rights */}
-                      {isSuperAdmin || isSupervisor ? (
+                      {t.category === 'koreksi' ? (
+                        <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">
+                          Audit Log
+                        </span>
+                      ) : isSuperAdmin || isSupervisor ? (
                         <div className="flex items-center justify-end gap-1.5">
                           {t.status === 'pending' ? (
                             <>

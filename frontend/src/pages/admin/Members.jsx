@@ -18,6 +18,10 @@ import {
   QrCode,
   Clock,
   History,
+  UserX,
+  UserCheck,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -33,6 +37,7 @@ export const AdminMembers = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState('created_at');
   const [order, setOrder] = useState('DESC');
   const [pagination, setPagination] = useState({
@@ -58,6 +63,9 @@ export const AdminMembers = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [suspendModalOpen, setSuspendModalOpen] = useState(false);
+  const [unsuspendDialogOpen, setUnsuspendDialogOpen] = useState(false);
+  const [suspendReason, setSuspendReason] = useState('');
 
   // Active items for forms
   const [selectedMember, setSelectedMember] = useState(null);
@@ -80,6 +88,7 @@ export const AdminMembers = () => {
         page,
         limit,
         search: debouncedSearch,
+        status: statusFilter,
         sort_by: sortBy,
         order,
       });
@@ -96,7 +105,7 @@ export const AdminMembers = () => {
 
   useEffect(() => {
     fetchMembers(1, pagination.limit);
-  }, [debouncedSearch, sortBy, order]);
+  }, [debouncedSearch, statusFilter, sortBy, order]);
 
   // Handle Export to Excel
   const handleExportExcel = async () => {
@@ -219,6 +228,56 @@ export const AdminMembers = () => {
     }
   };
 
+  // Open Suspend
+  const handleOpenSuspend = (member) => {
+    setSelectedMember(member);
+    setSuspendReason('');
+    setSuspendModalOpen(true);
+  };
+
+  const handleSuspendSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedMember) return;
+    try {
+      setSubmitting(true);
+      const res = await request.put(API_ENDPOINTS.ADMIN.MEMBERS.SUSPEND(selectedMember.id), {
+        reason: suspendReason,
+      });
+      if (res.success) {
+        toast.success(res.message || 'Akun member berhasil disuspend');
+        setSuspendModalOpen(false);
+        fetchMembers(pagination.page, pagination.limit);
+      }
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Gagal mensuspend akun member');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Open Unsuspend
+  const handleOpenUnsuspend = (member) => {
+    setSelectedMember(member);
+    setUnsuspendDialogOpen(true);
+  };
+
+  const handleConfirmUnsuspend = async () => {
+    if (!selectedMember) return;
+    try {
+      setSubmitting(true);
+      const res = await request.put(API_ENDPOINTS.ADMIN.MEMBERS.UNSUSPEND(selectedMember.id));
+      if (res.success) {
+        toast.success(res.message || 'Akun member berhasil diaktifkan kembali');
+        setUnsuspendDialogOpen(false);
+        fetchMembers(pagination.page, pagination.limit);
+      }
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Gagal mengaktifkan akun member');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Page Header */}
@@ -267,6 +326,19 @@ export const AdminMembers = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+          <Select
+            className="w-36"
+            size="sm"
+            options={[
+              { value: 'all', label: 'Semua Status' },
+              { value: 'active', label: 'Aktif' },
+              { value: 'suspended', label: 'Suspended' },
+            ]}
+            value={statusFilter}
+            onChange={(opt) => setStatusFilter(opt.value)}
+            isSearchable={false}
+          />
+
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <span className="font-bold whitespace-nowrap">Urutkan:</span>
             <Select
@@ -300,13 +372,14 @@ export const AdminMembers = () => {
       {/* Members Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[850px] text-left text-xs">
+          <table className="w-full min-w-[900px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-100 whitespace-nowrap">
               <tr>
                 <th className="py-3 px-4">Kode Member</th>
                 <th className="py-3 px-4">Nama Lengkap</th>
                 <th className="py-3 px-4">No. HP / WhatsApp</th>
                 <th className="py-3 px-4">Total Poin</th>
+                <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4">Tgl Bergabung</th>
                 <th className="py-3 px-4 text-center">Aksi</th>
               </tr>
@@ -314,13 +387,13 @@ export const AdminMembers = () => {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="py-6">
-                    <TableSkeleton rows={5} cols={6} />
+                  <td colSpan="7" className="py-6">
+                    <TableSkeleton rows={5} cols={7} />
                   </td>
                 </tr>
               ) : members.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="py-8">
+                  <td colSpan="7" className="py-8">
                     <EmptyState
                       icon={Users}
                       title="Data Member Tidak Ditemukan"
@@ -345,6 +418,26 @@ export const AdminMembers = () => {
                         {Number(m.total_points).toLocaleString('id-ID')} pts
                       </span>
                     </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {m.status === 'suspended' ? (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full text-[10px]">
+                            <UserX className="w-3 h-3 text-rose-600" />
+                            Suspended
+                          </span>
+                          {m.suspend_reason && (
+                            <div className="text-[10px] text-slate-400 truncate max-w-[120px]" title={m.suspend_reason}>
+                              {m.suspend_reason}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px]">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          Aktif
+                        </span>
+                      )}
+                    </td>
                     <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
                       {new Date(m.created_at).toLocaleDateString('id-ID', { dateStyle: 'medium' })}
                     </td>
@@ -366,6 +459,25 @@ export const AdminMembers = () => {
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
+                        {m.status === 'suspended' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenUnsuspend(m)}
+                            className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition"
+                            title="Aktifkan Kembali Akun Member"
+                          >
+                            <UserCheck className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSuspend(m)}
+                            className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition"
+                            title="Suspend Akun Member"
+                          >
+                            <UserX className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleOpenDelete(m)}
@@ -635,6 +747,65 @@ export const AdminMembers = () => {
         title="Hapus Member"
         message={`Apakah Anda yakin ingin menghapus data member "${selectedMember?.name}"? Semua riwayat poin dan transaksi member ini akan ikut terhapus.`}
         confirmText="Ya, Hapus Member"
+        isLoading={submitting}
+      />
+
+      {/* Suspend Member Modal */}
+      <Modal
+        isOpen={suspendModalOpen}
+        onClose={() => setSuspendModalOpen(false)}
+        title="Suspend Akun Member"
+        subtitle={`Nonaktifkan akun member ${selectedMember?.name || ''} (${selectedMember?.member_code || ''})`}
+      >
+        <form onSubmit={handleSuspendSubmit} className="space-y-4">
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-amber-800 leading-relaxed">
+              Member yang berstatus <strong>Suspended</strong> tidak dapat menukarkan poin reward atau membuat reservasi baru. Member akan menerima notifikasi dan banner di dashboard untuk menghubungi pihak hotel via <strong>Contact Us</strong>.
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Alasan Suspend (Opsional)
+            </label>
+            <textarea
+              rows={3}
+              value={suspendReason}
+              onChange={(e) => setSuspendReason(e.target.value)}
+              placeholder="Contoh: Terindikasi penyalahgunaan poin / reservasi tidak sah..."
+              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setSuspendModalOpen(false)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <UserX className="w-4 h-4" />
+              <span>{submitting ? 'Memproses...' : 'Suspend Akun Sekarang'}</span>
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Unsuspend Member Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={unsuspendDialogOpen}
+        onClose={() => setUnsuspendDialogOpen(false)}
+        onConfirm={handleConfirmUnsuspend}
+        title="Aktifkan Kembali Akun Member"
+        message={`Apakah Anda yakin ingin mengaktifkan kembali akun member "${selectedMember?.name}" (${selectedMember?.member_code})? Member akan dapat menggunakan kembali fitur penukaran poin dan reservasi kamar.`}
+        confirmText="Ya, Aktifkan Akun"
         isLoading={submitting}
       />
     </div>

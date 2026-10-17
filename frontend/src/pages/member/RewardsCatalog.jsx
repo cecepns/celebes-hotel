@@ -75,6 +75,10 @@ export const RewardsCatalog = () => {
       navigate('/login');
       return;
     }
+    if (user?.status === 'suspended') {
+      toast.error('Akun Anda saat ini sementara di-suspend oleh pihak hotel. Silakan hubungi pihak hotel via Contact Us.');
+      return;
+    }
     setActiveReward(reward);
     setRedeemModalOpen(true);
   };

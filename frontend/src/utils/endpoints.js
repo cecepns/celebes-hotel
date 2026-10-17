@@ -50,6 +50,8 @@ export const API_ENDPOINTS = {
       DETAIL: (id) => `/admin/members/${id}`,
       UPDATE: (id) => `/admin/members/${id}`,
       DELETE: (id) => `/admin/members/${id}`,
+      SUSPEND: (id) => `/admin/members/${id}/suspend`,
+      UNSUSPEND: (id) => `/admin/members/${id}/unsuspend`,
       EXPORT: '/admin/members/export',
     },
     USERS: {

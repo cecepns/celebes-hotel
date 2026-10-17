@@ -229,6 +229,20 @@ const initSchemaUpdates = async () => {
         [key, val, desc]
       );
     }
+
+    // 10. Ensure member suspend columns & enums exist
+    try {
+      await pool.query("ALTER TABLE users ADD COLUMN status ENUM('active', 'suspended') DEFAULT 'active' AFTER role");
+    } catch (e) {}
+    try {
+      await pool.query("ALTER TABLE users ADD COLUMN suspend_reason VARCHAR(255) NULL AFTER status");
+    } catch (e) {}
+    try {
+      await pool.query("ALTER TABLE transactions MODIFY COLUMN category ENUM('kamar', 'fnb', 'drugstore', 'laundry', 'lainnya', 'koreksi') NOT NULL DEFAULT 'kamar'");
+    } catch (e) {}
+    try {
+      await pool.query("ALTER TABLE point_ledger MODIFY COLUMN source_type ENUM('transaction', 'mission', 'bonus', 'adjustment', 'redemption') DEFAULT 'transaction'");
+    } catch (e) {}
   } catch (err) {
     console.warn('DB schema check:', err.message);
   }
@@ -572,6 +586,8 @@ app.post('/api/auth/login', async (req, res) => {
           email: user.email,
           birth_date: user.birth_date,
           role: user.role,
+          status: user.status || 'active',
+          suspend_reason: user.suspend_reason || null,
           member_code: user.member_code,
           total_points: currentPoints
         }
@@ -585,7 +601,7 @@ app.post('/api/auth/login', async (req, res) => {
 // Profile
 app.get('/api/auth/profile', verifyToken, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT id, name, phone, email, birth_date, role, member_code, avatar, created_at FROM users WHERE id = ?', [req.user.id]);
+    const [rows] = await pool.query('SELECT id, name, phone, email, birth_date, role, status, suspend_reason, member_code, avatar, created_at FROM users WHERE id = ?', [req.user.id]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
     }
@@ -694,12 +710,13 @@ app.get('/api/member/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// Member FIFO Points Breakdown Schedule
+// Member FIFO Points Breakdown Schedule & Complete History (Poin Masuk, Voucher Keluar, Koreksi, Expire)
 app.get('/api/member/points-breakdown', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
     await syncUserPointsFIFO(userId);
 
+    // 1. Point batches (for expiration schedule)
     const [rows] = await pool.query(
       `SELECT id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description,
               DATEDIFF(expiry_date, NOW()) AS days_left
@@ -709,7 +726,94 @@ app.get('/api/member/points-breakdown', verifyToken, async (req, res) => {
       [userId]
     );
 
-    res.json({ success: true, data: rows });
+    // 2. Voucher Redemptions (Pemakaian Poin untuk Klaim Voucher)
+    const [redemptions] = await pool.query(
+      `SELECT rr.id, rr.voucher_code, rr.points_used, rr.status, rr.redeemed_at, rr.valid_until, rr.used_at, rr.used_notes,
+              r.title AS reward_title, r.category AS reward_category
+       FROM reward_redemptions rr
+       JOIN rewards r ON rr.reward_id = r.id
+       WHERE rr.user_id = ?
+       ORDER BY rr.redeemed_at DESC`,
+      [userId]
+    );
+
+    // 3. Construct unified chronological history
+    const history = [];
+
+    // Add ledger entries (earned, bonuses, missions, corrections)
+    for (const l of rows) {
+      if (l.source_type === 'redemption') {
+        // Redemptions are added from reward_redemptions with richer details
+        continue;
+      }
+
+      let categoryType = 'earned';
+      if (l.points_earned < 0) {
+        categoryType = 'adjustment_deduct';
+      } else if (l.source_type === 'adjustment') {
+        categoryType = 'adjustment_add';
+      } else if (l.source_type === 'mission') {
+        categoryType = 'mission';
+      } else if (l.source_type === 'bonus') {
+        categoryType = 'bonus';
+      }
+
+      history.push({
+        id: `ledger-${l.id}`,
+        type: categoryType,
+        source_type: l.source_type,
+        title: l.description,
+        points: l.points_earned,
+        date: l.earned_date,
+        is_expired: l.is_expired,
+        expiry_date: l.expiry_date,
+        points_remaining: l.points_remaining,
+        days_left: l.days_left,
+      });
+    }
+
+    // Add voucher usage entries (pemakaian poin untuk reward)
+    for (const r of redemptions) {
+      history.push({
+        id: `redemption-${r.id}`,
+        type: 'voucher_usage',
+        source_type: 'redemption',
+        title: `Klaim Voucher: ${r.reward_title}`,
+        voucher_code: r.voucher_code,
+        points: -Math.abs(r.points_used),
+        date: r.redeemed_at,
+        valid_until: r.valid_until,
+        status: r.status,
+        used_at: r.used_at,
+        used_notes: r.used_notes,
+      });
+    }
+
+    // Sort descending by date
+    history.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Calculate totals
+    const totalActive = rows
+      .filter((l) => !l.is_expired && l.points_remaining > 0)
+      .reduce((sum, l) => sum + (l.points_remaining || 0), 0);
+
+    const expiring30d = rows
+      .filter((l) => !l.is_expired && l.points_remaining > 0 && l.days_left >= 0 && l.days_left <= 30)
+      .reduce((sum, l) => sum + (l.points_remaining || 0), 0);
+
+    const totalRedeemed = redemptions.reduce((sum, r) => sum + (r.points_used || 0), 0);
+
+    res.json({
+      success: true,
+      data: rows,
+      history,
+      redemptions,
+      summary: {
+        total_active_points: totalActive,
+        expiring_30_days: expiring30d,
+        total_redeemed_points: totalRedeemed,
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -767,8 +871,21 @@ app.post('/api/member/rewards/redeem', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Maaf, kuota voucher ini sudah habis' });
     }
 
-    // Check user points
-    const [userRows] = await connection.query('SELECT total_points FROM users WHERE id = ? FOR UPDATE', [userId]);
+    // Check user points & status
+    const [userRows] = await connection.query('SELECT total_points, status FROM users WHERE id = ? FOR UPDATE', [userId]);
+    if (!userRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Data user tidak ditemukan' });
+    }
+
+    if (userRows[0].status === 'suspended') {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Akun Anda saat ini sementara disuspend oleh pihak hotel. Silakan hubungi pihak hotel melalui portal Contact Us.'
+      });
+    }
+
     const currentPoints = parseInt(userRows[0].total_points) || 0;
 
     if (currentPoints < reward.points_required) {
@@ -816,9 +933,25 @@ app.post('/api/member/rewards/redeem', verifyToken, async (req, res) => {
       [userId, reward.id, voucherCode, reward.points_required, 'active', validUntil]
     );
 
+    // Insert negative audit entry in point_ledger for complete transparency
+    const voucherAuditDesc = `[KLAIM VOUCHER] ${reward.title} (Kode: ${voucherCode})`;
+    await connection.query(
+      'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, 0, NOW(), NOW(), 0, "redemption", ?)',
+      [userId, -reward.points_required, voucherAuditDesc]
+    );
+
     // Update user balance
     const newTotal = currentPoints - reward.points_required;
     await connection.query('UPDATE users SET total_points = ? WHERE id = ?', [newTotal, userId]);
+
+    // Send In-App Notification
+    await createNotification(
+      userId,
+      'Voucher Berhasil Diklaim!',
+      `Anda telah menukarkan ${reward.points_required} poin untuk voucher "${reward.title}" (Kode: ${voucherCode}). Silakan cek detail voucher di tab "Voucher Saya".`,
+      'reward',
+      connection
+    );
 
     await connection.commit();
 
@@ -1215,6 +1348,16 @@ app.post('/api/member/reservations', upload.single('payment_proof'), async (req,
       }
     }
 
+    if (userId) {
+      const [uRows] = await pool.query('SELECT status, suspend_reason FROM users WHERE id = ?', [userId]);
+      if (uRows.length > 0 && uRows[0].status === 'suspended') {
+        return res.status(403).json({
+          success: false,
+          message: 'Akun Anda saat ini sementara di-suspend oleh pihak hotel. Silakan hubungi pihak hotel melalui menu Contact Us untuk bantuan lebih lanjut.'
+        });
+      }
+    }
+
     if (!guest_name || !guest_phone || !room_type || !check_in || !check_out) {
       return res.status(400).json({ success: false, message: 'Nama, telepon, tipe kamar, dan tanggal check-in/out wajib diisi' });
     }
@@ -1604,14 +1747,19 @@ app.get('/api/admin/dashboard', verifyAdmin, async (req, res) => {
   }
 });
 
-// Admin Members List (Realtime search debounce, backend pagination 10/25/50/100, sorting)
+// Admin Members List (Realtime search debounce, backend pagination 10/25/50/100, sorting, status filter)
 app.get('/api/admin/members', verifyAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '', sort_by = 'created_at', order = 'DESC' } = req.query;
+    const { page = 1, limit = 10, search = '', status = 'all', sort_by = 'created_at', order = 'DESC' } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let whereClause = 'WHERE role = "member"';
     const params = [];
+
+    if (status && status !== 'all') {
+      whereClause += ' AND status = ?';
+      params.push(status);
+    }
 
     if (search.trim()) {
       whereClause += ' AND (name LIKE ? OR phone LIKE ? OR member_code LIKE ? OR email LIKE ?)';
@@ -1619,7 +1767,7 @@ app.get('/api/admin/members', verifyAdmin, async (req, res) => {
       params.push(s, s, s, s);
     }
 
-    const validSorts = ['id', 'name', 'phone', 'member_code', 'total_points', 'created_at'];
+    const validSorts = ['id', 'name', 'phone', 'member_code', 'total_points', 'status', 'created_at'];
     const sortField = validSorts.includes(sort_by) ? sort_by : 'created_at';
     const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -1627,7 +1775,7 @@ app.get('/api/admin/members', verifyAdmin, async (req, res) => {
     const total = countRows[0].total;
 
     const [rows] = await pool.query(
-      `SELECT id, name, phone, email, member_code, total_points, avatar, created_at, updated_at
+      `SELECT id, name, phone, email, member_code, total_points, status, suspend_reason, avatar, created_at, updated_at
        FROM users ${whereClause}
        ORDER BY ${sortField} ${sortOrder}
        LIMIT ? OFFSET ?`,
@@ -1775,6 +1923,70 @@ app.delete('/api/admin/members/:id', verifyAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE id = ? AND role = "member"', [req.params.id]);
     res.json({ success: true, message: 'Member berhasil dihapus' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin Suspend Member (Tangguhkan akun member)
+app.put('/api/admin/members/:id/suspend', verifySupervisorOrAdmin, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const [memberRows] = await pool.query('SELECT id, name, status FROM users WHERE id = ?', [req.params.id]);
+    if (!memberRows.length) {
+      return res.status(404).json({ success: false, message: 'Member tidak ditemukan' });
+    }
+
+    const cleanReason = reason && reason.trim() ? reason.trim() : 'Penyelidikan aktivitas akun';
+    await pool.query(
+      'UPDATE users SET status = "suspended", suspend_reason = ? WHERE id = ?',
+      [cleanReason, req.params.id]
+    );
+
+    // Kirim notifikasi resmi ke akun member
+    await createNotification(
+      req.params.id,
+      'Akun Ditangguhkan (Suspended)',
+      `Akun Anda saat ini sementara disuspend oleh pihak hotel (${cleanReason}). Untuk informasi lebih lanjut atau mengaktifkan kembali akun Anda, silakan hubungi pihak hotel melalui portal Contact Us.`,
+      'system'
+    );
+
+    res.json({
+      success: true,
+      message: `Akun member ${memberRows[0].name} berhasil disuspend.`,
+      data: { status: 'suspended', suspend_reason: cleanReason }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Admin Unsuspend Member (Aktifkan kembali akun member)
+app.put('/api/admin/members/:id/unsuspend', verifySupervisorOrAdmin, async (req, res) => {
+  try {
+    const [memberRows] = await pool.query('SELECT id, name, status FROM users WHERE id = ?', [req.params.id]);
+    if (!memberRows.length) {
+      return res.status(404).json({ success: false, message: 'Member tidak ditemukan' });
+    }
+
+    await pool.query(
+      'UPDATE users SET status = "active", suspend_reason = NULL WHERE id = ?',
+      [req.params.id]
+    );
+
+    // Kirim notifikasi pemulihan akun ke member
+    await createNotification(
+      req.params.id,
+      'Akun Diaktifkan Kembali',
+      'Akun Anda telah diaktifkan kembali oleh manajemen hotel. Anda dapat kembali menikmati seluruh layanan dan program Royalti Reward HCH.',
+      'system'
+    );
+
+    res.json({
+      success: true,
+      message: `Akun member ${memberRows[0].name} telah diaktifkan kembali.`,
+      data: { status: 'active', suspend_reason: null }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2449,10 +2661,19 @@ app.post('/api/admin/transactions/manual-bonus', verifySupervisorOrAdmin, async 
     expiryDate.setDate(expiryDate.getDate() + 365);
 
     const desc = description ? description.trim() : `Bonus Poin Manual oleh ${req.user.name} (${req.user.role.toUpperCase()})`;
+    const bonusInvNo = `BONUS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+
+    const [txResult] = await connection.query(
+      `INSERT INTO transactions (
+        user_id, invoice_no, category, amount, points_earned, status, transaction_date, notes, created_by, approved_by, approved_at
+      ) VALUES (?, ?, 'koreksi', 0, ?, 'approved', CURDATE(), ?, ?, ?, NOW())`,
+      [user_id, bonusInvNo, numPoints, desc, req.user.id, req.user.id]
+    );
+    const txId = txResult.insertId;
 
     await connection.query(
-      'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, ?, NOW(), ?, 0, "bonus", ?)',
-      [user_id, numPoints, numPoints, expiryDate, desc]
+      'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, ?, ?, ?, NOW(), ?, 0, "bonus", ?)',
+      [user_id, txId, numPoints, numPoints, expiryDate, desc]
     );
 
     await connection.query('UPDATE users SET total_points = total_points + ? WHERE id = ?', [numPoints, user_id]);
@@ -2480,7 +2701,7 @@ app.post('/api/admin/transactions/manual-bonus', verifySupervisorOrAdmin, async 
 });
 
 // Penyesuaian / Koreksi Poin Tamu (+ Tambah atau - Potong karena salah input nota)
-// Wajib menyertakan alasan penyesuaian untuk transparansi ke user
+// Wajib menyertakan alasan penyesuaian untuk transparansi ke user dan record transaksi ke Admin/SPV
 app.post('/api/admin/transactions/adjust-points', verifySupervisorOrAdmin, async (req, res) => {
   const connection = await pool.getConnection();
   try {
@@ -2517,6 +2738,7 @@ app.post('/api/admin/transactions/adjust-points', verifySupervisorOrAdmin, async
     }
     const currentPoints = parseInt(userRows[0].total_points) || 0;
     const cleanReason = reason.trim();
+    const invDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
     if (type === 'deduct') {
       if (currentPoints < numPoints) {
@@ -2542,11 +2764,29 @@ app.post('/api/admin/transactions/adjust-points', verifySupervisorOrAdmin, async
         remainingNeed -= canTake;
       }
 
-      // Insert negative audit entry in ledger
+      // 1. Insert into transactions table so Admin and SPV can see the deduction record in Transaksi Poin
+      const adjInvoiceNo = `ADJ-${invDateStr}-${Math.floor(100 + Math.random() * 900)}`;
       const auditDesc = `[KOREKSI -${numPoints} PTS] ${cleanReason} (Oleh: ${req.user.name} - ${req.user.role.toUpperCase()})`;
+
+      const [txResult] = await connection.query(
+        `INSERT INTO transactions (
+          user_id, invoice_no, category, amount, points_earned, status, transaction_date, notes, created_by, approved_by, approved_at
+        ) VALUES (?, ?, 'koreksi', 0, ?, 'approved', CURDATE(), ?, ?, ?, NOW())`,
+        [
+          user_id,
+          adjInvoiceNo,
+          -numPoints,
+          auditDesc,
+          req.user.id,
+          req.user.id,
+        ]
+      );
+      const txId = txResult.insertId;
+
+      // 2. Insert negative audit entry in ledger linked to transaction_id
       await connection.query(
-        'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, 0, NOW(), NOW(), 0, "adjustment", ?)',
-        [user_id, -numPoints, auditDesc]
+        'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, ?, ?, 0, NOW(), NOW(), 0, "adjustment", ?)',
+        [user_id, txId, -numPoints, auditDesc]
       );
 
       const newTotal = currentPoints - numPoints;
@@ -2568,13 +2808,31 @@ app.post('/api/admin/transactions/adjust-points', verifySupervisorOrAdmin, async
       });
     } else {
       // type === 'add'
-      const expiryDate = new Date();
-      expiryDate.setDate(expiryDate.getDate() + 365);
+      const adjInvoiceNo = `ADJ-${invDateStr}-${Math.floor(100 + Math.random() * 900)}`;
       const auditDesc = `[PENYESUAIAN +${numPoints} PTS] ${cleanReason} (Oleh: ${req.user.name} - ${req.user.role.toUpperCase()})`;
 
+      // 1. Insert into transactions table so Admin and SPV can see the record in Transaksi Poin
+      const [txResult] = await connection.query(
+        `INSERT INTO transactions (
+          user_id, invoice_no, category, amount, points_earned, status, transaction_date, notes, created_by, approved_by, approved_at
+        ) VALUES (?, ?, 'koreksi', 0, ?, 'approved', CURDATE(), ?, ?, ?, NOW())`,
+        [
+          user_id,
+          adjInvoiceNo,
+          numPoints,
+          auditDesc,
+          req.user.id,
+          req.user.id,
+        ]
+      );
+      const txId = txResult.insertId;
+
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 365);
+
       await connection.query(
-        'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, NULL, ?, ?, NOW(), ?, 0, "adjustment", ?)',
-        [user_id, numPoints, numPoints, expiryDate, auditDesc]
+        'INSERT INTO point_ledger (user_id, transaction_id, points_earned, points_remaining, earned_date, expiry_date, is_expired, source_type, description) VALUES (?, ?, ?, ?, NOW(), ?, 0, "adjustment", ?)',
+        [user_id, txId, numPoints, numPoints, expiryDate, auditDesc]
       );
 
       const newTotal = currentPoints + numPoints;

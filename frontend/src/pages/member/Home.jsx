@@ -23,6 +23,7 @@ import {
   ExternalLink,
   Building2,
   Bell,
+  AlertOctagon,
 } from 'lucide-react';
 import { AnnouncementFeed } from '@/components/common/AnnouncementFeed';
 
@@ -168,6 +169,42 @@ export const Home = () => {
 
       {/* Main Body Content */}
       <main className="px-4 py-4 space-y-4">
+        {/* Suspended Account Banner */}
+        {isAuthenticated && user?.status === 'suspended' && (
+          <div className="bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 rounded-2xl p-4 text-white shadow-md space-y-2 border border-red-300">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0 mt-0.5">
+                <AlertOctagon className="w-6 h-6 text-white" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-extrabold text-white">Akun Anda Sementara Disuspend</h4>
+                  <span className="text-[10px] font-black uppercase bg-black/30 px-2 py-0.5 rounded-full text-red-100">
+                    Suspended
+                  </span>
+                </div>
+                <p className="text-xs text-red-50 mt-1 leading-relaxed">
+                  {user?.suspend_reason ? (
+                    <span className="block font-medium mb-1">
+                      Catatan Hotel: &ldquo;{user.suspend_reason}&rdquo;
+                    </span>
+                  ) : null}
+                  Akun member Anda sementara dinonaktifkan oleh pihak hotel. Penukaran voucher dan reservasi baru tidak dapat dilakukan saat ini. Silakan hubungi pihak hotel melalui portal Contact Us.
+                </p>
+                <div className="pt-2">
+                  <Link
+                    to="/contact-us"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-red-700 text-xs font-bold rounded-xl shadow-xs hover:bg-red-50 transition"
+                  >
+                    <Headset className="w-3.5 h-3.5 text-red-600" />
+                    <span>Hubungi Pihak Hotel (Contact Us)</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Guest Greeting / Member Status */}
         {isAuthenticated ? (
           <div className="flex items-center justify-between px-1">

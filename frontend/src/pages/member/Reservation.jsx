@@ -439,6 +439,11 @@ export const Reservation = () => {
       return;
     }
 
+    if (user?.status === 'suspended') {
+      toast.error('Akun Anda saat ini sementara di-suspend oleh pihak hotel. Silakan hubungi pihak hotel via Contact Us untuk reservasi.');
+      return;
+    }
+
     if (conflictDate) {
       toast.error(`Tanggal yang dipilih ditutup untuk booking: ${conflictDate.reason}`);
       return;

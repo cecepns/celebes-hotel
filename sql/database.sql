@@ -26,13 +26,16 @@ CREATE TABLE users (
   birth_date DATE NULL,
   password VARCHAR(255) NOT NULL,
   role ENUM('admin', 'supervisor', 'resepsionis', 'kasir', 'staff', 'member') DEFAULT 'member',
+  status ENUM('active', 'suspended') DEFAULT 'active',
+  suspend_reason VARCHAR(255) NULL,
   member_code VARCHAR(50) NOT NULL UNIQUE,
   avatar VARCHAR(255) NULL,
   total_points INT DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_phone (phone),
-  INDEX idx_member_code (member_code)
+  INDEX idx_member_code (member_code),
+  INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------
@@ -86,7 +89,7 @@ CREATE TABLE transactions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   invoice_no VARCHAR(60) NOT NULL,
-  category ENUM('kamar', 'fnb', 'drugstore', 'laundry', 'lainnya') NOT NULL,
+  category ENUM('kamar', 'fnb', 'drugstore', 'laundry', 'lainnya', 'koreksi') NOT NULL DEFAULT 'kamar',
   amount DECIMAL(15,2) NOT NULL,
   points_earned INT NOT NULL DEFAULT 0,
   status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'approved',
@@ -115,7 +118,7 @@ CREATE TABLE point_ledger (
   earned_date DATETIME NOT NULL,
   expiry_date DATETIME NOT NULL,
   is_expired TINYINT(1) DEFAULT 0,
-  source_type ENUM('transaction', 'mission', 'bonus', 'adjustment') DEFAULT 'transaction',
+  source_type ENUM('transaction', 'mission', 'bonus', 'adjustment', 'redemption') DEFAULT 'transaction',
   description VARCHAR(255) NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
